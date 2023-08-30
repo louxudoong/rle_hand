@@ -94,14 +94,48 @@ def main_worker(gpu, opt, cfg):
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=cfg.TRAIN.LR_STEP, gamma=cfg.TRAIN.LR_FACTOR)
 
-    train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
+    # modi1:use my own dataset - lxd Freihand_RLE
+    # train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
+    # modi start
+    import rlepose.datasets.lxd_freihand as lxd_freihand
+    import rlepose.datasets.mytransform as mytransform
+    root_dir = "/home/louxd/dataset/FreiHand"
+    split0_train = "FreiHAND_pub_v2/training"
+    split1_train = "FreiHAND_pub_v2"
+    split2_train = "training"
+    split0_eval = "FreiHAND_pub_v2_eval/evaluation"
+    split1_eval = "FreiHAND_pub_v2_eval"
+    split2_eval = "evaluation"
+    mode_train = "train"
+    mode_eval = "eval"
+    batch_size = cfg.TRAIN.BATCH_SIZE
+
+    train_transforms = mytransform.Compose([
+                                        # Mytransforms.RandomResized(),
+                                        # Mytransforms.RandomRotate(40),
+                                        # Mytransforms.RandomCrop(368),
+                                        # Mytransforms.RandomHorizontalFlip(),
+                                        mytransform.TestResized(368),
+                                        ])
+
+    eval_transforms = mytransform.Compose([
+                                            mytransform.TestResized(368),
+                                            ])
+    
+    train_dataset = lxd_freihand.FreiHand_RLE(root_dir, split0_train, split1_train, split2_train, 
+                                              mode=mode_train, stride=8, transformer=train_transforms)
+    # modi end
+    print(f"modi1: load freidata.")
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset, num_replicas=opt.world_size, rank=opt.rank)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=(train_sampler is None), num_workers=opt.nThreads, sampler=train_sampler, worker_init_fn=_init_fn)
+        train_dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=(train_sampler is None), num_workers=opt.nThreads, 
+        sampler=train_sampler, worker_init_fn=_init_fn)
+
 
     output_3d = cfg.DATA_PRESET.get('OUT_3D', False)
 
+    # 这个东西后面算err有用，也不知道干嘛的
     heatmap_to_coord = get_coord(cfg, cfg.DATA_PRESET.HEATMAP_SIZE, output_3d) # 别被骗了！跟heatmap没有半毛钱关系，只是将输出坐标转换到目标坐标
 
     opt.trainIters = 0

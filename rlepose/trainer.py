@@ -38,14 +38,18 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
     if opt.log:
         train_loader = tqdm(train_loader, dynamic_ncols=True)
 
-    for i, (inps, labels, _, bboxes) in enumerate(train_loader):
+    # modi3: labels = gt_uv
+    # for i, (inps, labels, _, bboxes) in enumerate(train_loader):
+    for i, (inps, labels) in enumerate(train_loader):
         inps = inps.cuda()
 
-        for k, _ in labels.items():
-            if k == 'type':
-                continue
+        # modi4
+        # for k, _ in labels.items():
+        #     if k == 'type':
+        #         continue
 
-            labels[k] = labels[k].cuda(opt.gpu)
+        #     labels[k] = labels[k].cuda(opt.gpu)
+        labels = labels.cuda()
 
         output = m(inps, labels)
 
@@ -162,7 +166,7 @@ def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
 
 
 def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
-    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD)
+    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD) # 构建一个mscoco的对象，输入参数为
     gt_val_sampler = torch.utils.data.distributed.DistributedSampler(
         gt_val_dataset, num_replicas=opt.world_size, rank=opt.rank)
 

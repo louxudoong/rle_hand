@@ -135,6 +135,7 @@ def main_worker(gpu, opt, cfg):
     opt.trainIters = 0
     best_err = 999
 
+
     for i in range(cfg.TRAIN.BEGIN_EPOCH, cfg.TRAIN.END_EPOCH):
         opt.epoch = i
         train_sampler.set_epoch(i)
@@ -151,6 +152,7 @@ def main_worker(gpu, opt, cfg):
         if (i + 1) % opt.snapshot == 0:
             # Save checkpoint
             if opt.log:
+                print(f"save weights at epoch {opt.epoch}")
                 torch.save(m.module.state_dict(), './exp/{}-{}/model_{}.pth'.format(opt.exp_id, cfg.FILE_NAME, opt.epoch))
             # Prediction Test
             with torch.no_grad():
@@ -168,10 +170,8 @@ def main_worker(gpu, opt, cfg):
                     logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | det mAP: {det_AP} #####')
 
         torch.distributed.barrier()  # Sync
-        # modi6: save weights after each epoch
-        torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
-    #torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
-
+    torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
+    print(f"save final weights.")
 
 def preset_model(cfg):
     model = builder.build_sppe(cfg.MODEL, preset_cfg=cfg.DATA_PRESET)

@@ -1,6 +1,6 @@
 DATASET:
   TRAIN:
-    TYPE: 'Freihand'
+    TYPE: 'Freihand_CustomDataset'
     ROOT: ''
     IMG_PREFIX: ''
     ANN: ''
@@ -11,12 +11,12 @@ DATASET:
       NUM_JOINTS_HALF_BODY: 3
       PROB_HALF_BODY: 0.3
   VAL:
-    TYPE: 'Freihand'
+    TYPE: 'Freihand_CustomDataset'
     ROOT: ''
     IMG_PREFIX: ''
     ANN: ''
   TEST:
-    TYPE: 'Freihand'
+    TYPE: 'Freihand_CustomDataset'
     ROOT: ''
     IMG_PREFIX: ''
     DET_FILE: './exp/json/test_det_rcnn.json'

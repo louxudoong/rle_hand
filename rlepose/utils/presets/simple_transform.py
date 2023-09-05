@@ -216,6 +216,7 @@ class SimpleTransform(object):
 
         bbox = _center_scale_to_box(center, scale)
 
+        # 归一化在这里
         img = im_to_torch(img)
         img[0].add_(-0.406)
         img[1].add_(-0.457)

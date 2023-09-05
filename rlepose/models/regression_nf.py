@@ -153,8 +153,9 @@ class RegressFlow(nn.Module):
         if self.training and labels is not None:
             # modi2
             # gt_uv = labels['target_uv'].reshape(pred_jts.shape)
-            gt_uv = labels.reshape(pred_jts.shape)  # torch.Size([32, 17, 2])
-            print(f"modi2: get_uv size = {gt_uv.shape}")
+            # print("debug regression: ", pred_jts)
+            gt_uv = labels['target_uv'].reshape(pred_jts.shape)  # torch.Size([32, 17, 2])
+            # print(f"modi2: get_uv size = {gt_uv.shape}")
             bar_mu = (pred_jts - gt_uv) / sigma
             # (B, K, 2)
             log_phi = self.flow.log_prob(bar_mu.reshape(-1, 2)).reshape(BATCH_SIZE, self.num_joints, 1)

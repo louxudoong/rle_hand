@@ -1,13 +1,17 @@
-# -*-coding:UTF-8-*-
+"""Custum training dataset."""
+import copy
 import os
+import pickle as pk
+from abc import abstractmethod, abstractproperty
+
+import cv2
+import torch.utils.data as data
+from rlepose.utils.presets import SimpleTransform
+from pycocotools.coco import COCO
+
 import numpy as np
 import glob
-# import torch.utils.data as data
 from PIL import Image
-import cv2
-import sys
-sys.path.append("../thirdparty")
-import rlepose.datasets.mytransform as mytransform
 import json
 
 def read_data_file(root_dir, split="FreiHAND_pub_v2_eval/evaluation"):
@@ -74,62 +78,32 @@ def read_mat_file(root_dir, split1, split2, img_list):
     return kpts, centers, scales
 
 
-def guassian_kernel(size_w, size_h, center_x, center_y, sigma):
-    gridy, gridx = np.mgrid[0:size_h, 0:size_w]
-    D2 = (gridx - center_x) ** 2 + (gridy - center_y) ** 2
-    return np.exp(-D2 / 2.0 / sigma / sigma)
+class Freihand_CustomDataset(data.Dataset):
+    """Custom dataset.
+    Modified from the coco dataset to fit Freihand
 
-
-import re
-def re_encode(params):
-    # old_dic = params.
-    keys = params.keys()
-    counter = {}
-    new_keys = []
-    for item in keys:
-        # 使用正则表达式匹配conv2d_xx的数字部分
-        match = re.search(r'conv2d_(\d+)', item)
-        if match:
-            number = int(match.group(1))  # 提取匹配到的数字并转为整数
-            suffix = re.search(r'(\w+)$', item).group()  # 提取后缀名部分
-
-            # 检查字典中是否有后缀名对应的计数器
-            if suffix not in counter:
-                counter[suffix] = 0
-
-            # 对应后缀名的计数器加1，并将新编号替换原字符串中的数字部分
-            counter[suffix] += 1
-            new_number = counter[suffix] - 1
-            new_item = re.sub(r'conv2d_\d+', f'conv2d_{new_number}', item)
-            # print(new_item)
-            new_keys.append(new_item)
-    
-    new_params = {}
-    for old_key, new_key in zip(keys, new_keys):
-        old_value = params.get(old_key)
-        if old_value is not None:
-            new_params[new_key] = old_value
-    
-    return new_params
-
-
-class FreiHand_RLE:
-    """
-        Args:
-            root_dir (str): the path of dateset.
-            stride (float): default = 8
-            transformer (Mytransforms): expand dataset.
-            mode: "eval" or "train"
-        Notice:
-            you have to change code to fit your own dataset except LSP
-
+    Parameters
+    ----------
+    train: bool, default is True
+        If true, will set as training mode.
+    skip_empty: bool, default is False
+        Whether skip entire image if no valid label is found.
+    cfg: dict, dataset configuration.
     """
 
-    def __init__(self, root_dir, split0, split1, split2, mode="eval", stride=8, transformer=None):
+    CLASSES = None
 
-        self.img_list = read_data_file(root_dir, split=split0)
+    def __init__(self,
+                 root_dir, split0, split1, split2, cfg, # frei args
+                 mode="eval", 
+                 train=True,
+                 skip_empty=True,
+                 lazy_import=False,
+                 ):
+        self._items = read_data_file(root_dir, split=split0)
+
         self.mode = mode
-        kpt_list, center_list, scale_list= read_mat_file(root_dir, split1, split2, self.img_list)
+        kpt_list, center_list, scale_list= read_mat_file(root_dir, split1, split2, self._items)
         if self.mode == "train":
             self.kpt_list = kpt_list * 4
             self.center_list = center_list * 4
@@ -138,55 +112,194 @@ class FreiHand_RLE:
             self.kpt_list = kpt_list
             self.center_list = center_list
             self.scale_list =scale_list
+
+
+
+        self._cfg = cfg
+        self._preset_cfg = cfg.DATA_PRESET
+        self.num_joints = 21
+        # self._root = cfg['ROOT']
+        # self._img_prefix = cfg['IMG_PREFIX']
+        # self._ann_file = os.path.join(self._root, cfg['ANN'])
+
+        self._lazy_import = lazy_import
+        self._skip_empty = skip_empty
+        self._train = train
+
+        if 'AUG' in cfg.DATASET.TRAIN.keys():
+            print("AUG ON.")
+            self._scale_factor =  cfg.DATASET.TRAIN['AUG']['SCALE_FACTOR']
+            self._rot =  cfg.DATASET.TRAIN['AUG']['ROT_FACTOR']
+            self.num_joints_half_body =  cfg.DATASET.TRAIN['AUG']['NUM_JOINTS_HALF_BODY']
+            self.prob_half_body =  cfg.DATASET.TRAIN['AUG']['PROB_HALF_BODY']
+        else:
+            print("AUG OFF.")
+            self._scale_factor = 0
+            self._rot = 0
+            self.num_joints_half_body = -1
+            self.prob_half_body = -1
+
+        self._input_size = self._preset_cfg['IMAGE_SIZE']
+        self._output_size = self._preset_cfg['HEATMAP_SIZE']
+
+        self._sigma = self._preset_cfg['SIGMA']
+
+        self._check_centers = False
+
+        # self.num_class = len(self.CLASSES)
+
+        self._loss_type = cfg.TEST.HEATMAP2COORD
+
+        self.upper_body_ids = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        self.lower_body_ids = (11, 12, 13, 14, 15, 16)
+
+        if self._preset_cfg['TYPE'] == 'simple':
+            self.transformation = SimpleTransform(
+                self, scale_factor=self._scale_factor,
+                input_size=self._input_size,
+                output_size=self._output_size,
+                rot=self._rot, sigma=self._sigma,
+                train=self._train, loss_type=self._loss_type)
+        else:
+            raise NotImplementedError
+
+        # self._items, self._labels = self._lazy_load_json()
+
+        # init中不再计算labels，因为他要进items的循环，放到getitem中来节省资源
+
+    def __getitem__(self, idx):
+        # get freihand imgs and gt_uv
+        img_path = self._items[idx]
+        kpt = copy.deepcopy(self.kpt_list[idx])
+        # img = np.array(cv2.imread(img_path), dtype=np.float32)
+        img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
         
-        self.stride = stride
-        self.transformer = transformer
-        self.sigma = 3.0
+        height, width = img.shape[0], img.shape[1]
+
+        label = self.check_load_keypoints(kpt, height, width) # 这个函数跟check没有关系了，只是把数据转成要求的格式
+
+        # import copy
+        
+        # center = copy.deepcopy(self.center_list[idx])
+        # scale = copy.deepcopy(self.scale_list[idx])
+
+        # get image id
+        # img_path = self._items[idx]
+        img_id = int(os.path.splitext(os.path.basename(img_path))[0])
+
+        # load ground truth, including bbox, keypoints, image size
+
         
 
+        # transform ground truth into training label and apply data augmentation
+        target = self.transformation(img, label)  # 不知道transform会不会报错呢
+        img = target.pop('image')
 
-    def __getitem__(self, index):
 
-        img_path = self.img_list[index]
-        img = np.array(cv2.imread(img_path), dtype=np.float32)
-
-        import copy
-        kpt = copy.deepcopy(self.kpt_list[index])
-        center = copy.deepcopy(self.center_list[index])
-        scale = copy.deepcopy(self.scale_list[index])
-
-        # expand dataset
-        #print(img.shape)
-        img, kpt, center = self.transformer(img, kpt, center, scale)
-        # height, width, _ = img.shape
-
-        # #attention: / 改为 //
-        # heatmap = np.zeros((height // self.stride, width // self.stride, len(kpt) + 1), dtype=np.float32)
-        # for i in range(len(kpt)):
-        #     x = int(kpt[i][0]) * 1.0 / self.stride
-        #     y = int(kpt[i][1]) * 1.0 / self.stride
-        #     heat_map = guassian_kernel(size_h=height / self.stride, size_w=width / self.stride, center_x=x, center_y=y, sigma=self.sigma)
-        #     heat_map[heat_map > 1] = 1
-        #     heat_map[heat_map < 0.0099] = 0
-        #     heatmap[:, :, i + 1] = heat_map
-
-        # heatmap[:, :, 0] = 1.0 - np.max(heatmap[:, :, 1:], axis=2)  # for background
-
-        # centermap = np.zeros((height, width, 1), dtype=np.float32)
-        # center_map = guassian_kernel(size_h=height, size_w=width, center_x=center[0], center_y=center[1], sigma=3)
-        # center_map[center_map > 1] = 1
-        # center_map[center_map < 0.0099] = 0
-        # centermap[:, :, 0] = center_map
-        # # img = copy.deepcopy(Mytransforms.normalize(Mytransforms.to_tensor(img), np.array([0.485, 0.456, 0.406])*255,
-        # #                              np.array([0.229, 0.224, 0.225])*255))
-        # img = copy.deepcopy(mytransform.normalize(mytransform.to_tensor(img), np.array([128., 128., 128.]),
-        #                         np.array([256., 256., 256.])))
-        # # img = Mytransforms.to_tensor(img)  在normalize已经to_tensor过了！！！！
-        # heatmap = copy.deepcopy(mytransform.to_tensor(heatmap))
-        # centermap = copy.deepcopy(mytransform.to_tensor(centermap))
-        return img, kpt
-
+        return img, target
+    
     def __len__(self):
-        return len(self.img_list)
+        return len(self._items)
+
+    # def _lazy_load_ann_file(self):
+    #     if os.path.exists(self._ann_file + '.pkl') and self._lazy_import:
+    #         print('Lazy load json...')
+    #         with open(self._ann_file + '.pkl', 'rb') as fid:
+    #             return pk.load(fid)
+    #     else:
+    #         _database = COCO(self._ann_file)
+    #         if os.access(self._ann_file + '.pkl', os.W_OK):
+    #             with open(self._ann_file + '.pkl', 'wb') as fid:
+    #                 pk.dump(_database, fid, pk.HIGHEST_PROTOCOL)
+    #         return _database
+
+    # def _lazy_load_json(self):
+    #     if os.path.exists(self._ann_file + '_annot_keypoint.pkl') and self._lazy_import:
+    #         print('Lazy load annot...')
+    #         with open(self._ann_file + '_annot_keypoint.pkl', 'rb') as fid:
+    #             items, labels = pk.load(fid)
+    #     else:
+    #         items, labels = self._load_jsons()
+    #         if os.access(self._ann_file + '_annot_keypoint.pkl', os.W_OK):
+    #             with open(self._ann_file + '_annot_keypoint.pkl', 'wb') as fid:
+    #                 pk.dump((items, labels), fid, pk.HIGHEST_PROTOCOL)
+
+    #     return items, labels
+
+    # @abstractmethod
+    # def _load_jsons(self):
+    #     pass
+    
+    def check_load_keypoints(self, kpt, height, width): # to check img and labels, and convert kpts to 3D
+        # frei中似乎没有置信度信息，取消一切关于检查的功能
+
+        # ann_ids = coco.getAnnIds(imgIds=entry['id'], iscrowd=False)
+        # objs = coco.loadAnns(ann_ids)
+        # check valid bboxes
+        valid_objs = []
+        # width = entry['width']
+        # height = entry['height']
+
+        # for obj in objs:
+        #     contiguous_cid = self.json_id_to_contiguous[obj['category_id']]
+        #     if contiguous_cid >= self.num_class:
+        #         # not class of interest
+        #         continue
+        #     if max(obj['keypoints']) == 0:
+        #         continue
+        # # convert from (x, y, w, h) to (xmin, ymin, xmax, ymax) and clip bound
+        # xmin, ymin, xmax, ymax = bbox_clip_xyxy(bbox_xywh_to_xyxy(obj['bbox']), width, height)
+        # require non-zero box area
+        # if obj['area'] <= 0 or xmax <= xmin or ymax <= ymin:
+        #     continue
+        # if obj['num_keypoints'] == 0:
+        #     continue
+        # joints 3d: (num_joints, 3, 2); 3 is for x, y, z; 2 is for position, visibility
+        joints_3d = np.zeros((self.num_joints, 3, 2), dtype=np.float32)
+        for i in range(self.num_joints):
+            joints_3d[i, 0, 0] = kpt[i, 0] # 按照设计，kpts为joints_num * 2的list
+            joints_3d[i, 1, 0] = kpt[i, 1]
+            # 避免出问题，把置信度全部改成1
+            joints_3d[i, 0, 1] = 1.
+            joints_3d[i, 1, 1] = 1.
+
+            # joints_3d[i, 2, 0] = 0
+            # visible = min(1, obj['keypoints'][i * 3 + 2])
+            # joints_3d[i, :2, 1] = visible
+            # joints_3d[i, 2, 1] = 0
+
+            # if np.sum(joints_3d[:, 0, 1]) < 1:
+            #     # no visible keypoint
+            #     continue
+
+            # if self._check_centers and self._train:
+            #     bbox_center, bbox_area = self._get_box_center_area((xmin, ymin, xmax, ymax))
+            #     kp_center, num_vis = self._get_keypoints_center_count(joints_3d)
+            #     ks = np.exp(-2 * np.sum(np.square(bbox_center - kp_center)) / bbox_area)
+            #     if (num_vis / 80.0 + 47 / 80.0) > ks:
+            #         continue
+
+            valid_objs = {
+                # 'bbox': (xmin, ymin, xmax, ymax),
+                'bbox': (1, -1, 0, 0),
+                'width': width,
+                'height': height,
+                'joints_3d': joints_3d
+            }
+
+        return valid_objs
 
 
+    @abstractproperty
+    def CLASSES(self):
+        return None
+
+    # @abstractproperty
+    # def num_joints(self):
+    #     return None
+
+    @abstractproperty
+    def joint_pairs(self):
+        """Joint pairs which defines the pairs of joint to be swapped
+        when the image is flipped horizontally."""
+        return None

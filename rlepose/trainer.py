@@ -34,22 +34,28 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
     output_3d = cfg.DATA_PRESET.get('OUT_3D', False)
     hm_shape = (hm_shape[1], hm_shape[0], depth_dim)
     grad_clip = cfg.TRAIN.get('GRAD_CLIP', False)
-
+    
     if opt.log:
         train_loader = tqdm(train_loader, dynamic_ncols=True)
 
-    # modi3: labels = gt_uv
+    # modi3: 
     # for i, (inps, labels, _, bboxes) in enumerate(train_loader):
+
+    # modi4: add neptune
+    import neptune
+    run = neptune.init_run(
+    project="louxudong1125/abc",
+    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJhMmI2YjAwMS0zMzhmLTQzZGMtYTI1OS0wYmYxZTdhOTU3NDUifQ==",
+)
+    
     for i, (inps, labels) in enumerate(train_loader):
         inps = inps.cuda()
 
-        # modi4
-        # for k, _ in labels.items():
-        #     if k == 'type':
-        #         continue
-
-        #     labels[k] = labels[k].cuda(opt.gpu)
-        labels = labels.cuda()
+        for k, _ in labels.items():
+            if k == 'type':
+                continue
+            
+            labels[k] = labels[k].cuda(opt.gpu)
 
         output = m(inps, labels)
 
@@ -75,6 +81,10 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
         optimizer.step()
 
         opt.trainIters += 1
+
+        # neptune
+        run["train/loss"].append(loss.item())
+        run["train/acc"].append(acc)
 
         if opt.log:
             # TQDM
@@ -198,7 +208,7 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
                     output[k] = (output[k] + output_flipped[k]) / 2
 
          # 处理每个输入图像的输出结果
-        for i in range(inps.shape[0]):
+        for i in range(inps.shape[0]): # batch_size
             bbox = bboxes[i].tolist()
             pose_coords, pose_scores = heatmap_to_coord(
                 output, bbox, idx=i)
@@ -216,6 +226,17 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
             data['keypoints'] = keypoints
 
             kpt_json.append(data)
+
+            # modi7: draw & save output
+            from rlepose.utils.lxd_draw_output import draw_paint
+            print(pose_coords.shape, inps.shape)
+            #draw_paint(inps[i], pose_coords)
+
+
+
+
+
+    
 
     with open(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{opt.rank}.pkl'), 'wb') as fid:
         pk.dump(kpt_json, fid, pk.HIGHEST_PROTOCOL)

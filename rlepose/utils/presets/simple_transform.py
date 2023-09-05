@@ -146,7 +146,8 @@ class SimpleTransform(object):
         return target, target_weight, target_visible, target_visible_weight
 
     def __call__(self, src, label):
-        bbox = list(label['bbox'])
+        label = dict(label)
+        bbox = label['bbox']
         gt_joints = label['joints_3d']
 
         imgwidth, imght = label['width'], label['height']
@@ -189,11 +190,16 @@ class SimpleTransform(object):
         if random.random() > 0.5 and self._train:
             # src, fliped = random_flip_image(src, px=0.5, py=0)
             # if fliped[0]:
-            assert src.shape[2] == 3
-            src = src[:, ::-1, :]
 
-            joints = flip_joints_3d(joints, imgwidth, self._joint_pairs)
-            center[0] = imgwidth - center[0] - 1
+            # modi: no pairs in hand
+            # assert src.shape[2] == 3
+            # src = src[:, ::-1, :]
+            # print(joints)
+            # print(imgwidth)
+            # print(self._joint_pairs)
+            # joints = flip_joints_3d(joints, imgwidth, self._joint_pairs)
+            # center[0] = imgwidth - center[0] - 1
+            pass
 
         inp_h, inp_w = input_size
         trans = get_affine_transform(center, scale, r, [inp_w, inp_h])

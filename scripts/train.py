@@ -81,6 +81,12 @@ def main_worker(gpu, opt, cfg):
     # Model Initialize
     m = preset_model(cfg)
 
+    # modi5: add pre-trained weights
+    load_weights = cfg.TRAIN.get('PRE_TRAINED', False) # ture in cfg
+    if load_weights:
+        print(f'Loading rel pre-trained weights from {opt.checkpoint}...')
+        m.load_state_dict(torch.load(opt.checkpoint, map_location='cpu'), strict=True)  # 加载权重
+
     m.cuda(opt.gpu)
     m = torch.nn.parallel.DistributedDataParallel(m, device_ids=[opt.gpu])  # 进行分布式训练
 
@@ -97,8 +103,7 @@ def main_worker(gpu, opt, cfg):
     # modi1:use my own dataset - lxd Freihand_RLE
     # train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
     # modi start
-    import rlepose.datasets.lxd_freihand as lxd_freihand
-    import rlepose.datasets.mytransform as mytransform
+    from rlepose.datasets import Freihand_CustomDataset
     root_dir = "/home/louxd/dataset/FreiHand"
     split0_train = "FreiHAND_pub_v2/training"
     split1_train = "FreiHAND_pub_v2"
@@ -109,21 +114,9 @@ def main_worker(gpu, opt, cfg):
     mode_train = "train"
     mode_eval = "eval"
     batch_size = cfg.TRAIN.BATCH_SIZE
-
-    train_transforms = mytransform.Compose([
-                                        # Mytransforms.RandomResized(),
-                                        # Mytransforms.RandomRotate(40),
-                                        # Mytransforms.RandomCrop(368),
-                                        # Mytransforms.RandomHorizontalFlip(),
-                                        mytransform.TestResized(368),
-                                        ])
-
-    eval_transforms = mytransform.Compose([
-                                            mytransform.TestResized(368),
-                                            ])
     
-    train_dataset = lxd_freihand.FreiHand_RLE(root_dir, split0_train, split1_train, split2_train, 
-                                              mode=mode_train, stride=8, transformer=train_transforms)
+    train_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
+                                                cfg, mode=mode_train)
     # modi end
     print(f"modi1: load freidata.")
     train_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -137,6 +130,7 @@ def main_worker(gpu, opt, cfg):
 
     # 这个东西后面算err有用，也不知道干嘛的
     heatmap_to_coord = get_coord(cfg, cfg.DATA_PRESET.HEATMAP_SIZE, output_3d) # 别被骗了！跟heatmap没有半毛钱关系，只是将输出坐标转换到目标坐标
+    # 注意，这里坐标转换涉及到“heatmap坐标”？？？论文中有提到使用了heatmap的预训练参数，但坐标是怎么跟heatmap扯上关系的呢
 
     opt.trainIters = 0
     best_err = 999
@@ -174,8 +168,9 @@ def main_worker(gpu, opt, cfg):
                     logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | det mAP: {det_AP} #####')
 
         torch.distributed.barrier()  # Sync
-
-    torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
+        # modi6: save weights after each epoch
+        torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
+    #torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
 
 
 def preset_model(cfg):

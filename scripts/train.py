@@ -102,21 +102,6 @@ def main_worker(gpu, opt, cfg):
 
     # modi1:use my own dataset - lxd Freihand_RLE
     train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
-    # modi start
-    # from rlepose.datasets import Freihand_CustomDataset
-    # root_dir = "/home/louxd/dataset/FreiHand"
-    # split0_train = "FreiHAND_pub_v2/training"
-    # split1_train = "FreiHAND_pub_v2"
-    # split2_train = "training"
-    # split0_eval = "FreiHAND_pub_v2_eval/evaluation"
-    # split1_eval = "FreiHAND_pub_v2_eval"
-    # split2_eval = "evaluation"
-    # mode_train = "train"
-    # mode_eval = "eval"
-    # batch_size = cfg.TRAIN.BATCH_SIZE
-    # train_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
-    #                                             cfg, mode=mode_train)
-    # modi end
     print(f"modi1: load freidata.")
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset, num_replicas=opt.world_size, rank=opt.rank)
@@ -148,7 +133,7 @@ def main_worker(gpu, opt, cfg):
 
         lr_scheduler.step()
 
-        if (i + 1) % opt.snapshot == 0:
+        if (i + 1) % opt.snapshot == 0: # snapshot default = 1
             # Save checkpoint
             if opt.log:
                 print(f"save weights at epoch {opt.epoch}")
@@ -165,8 +150,9 @@ def main_worker(gpu, opt, cfg):
 
                 else:
                     gt_AP = validate_gt(m, opt, cfg, heatmap_to_coord)
-                    det_AP = validate(m, opt, cfg, heatmap_to_coord)
-                    logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | det mAP: {det_AP} #####')
+                    # det_AP = validate(m, opt, cfg, heatmap_to_coord)
+                    # logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | det mAP: {det_AP} #####')
+                    logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} #####')
 
         torch.distributed.barrier()  # Sync
     torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))

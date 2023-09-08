@@ -191,22 +191,7 @@ def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
 
 
 def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
-    root_dir = "/home/louxd/dataset/FreiHand"
-    split0_train = "FreiHAND_pub_v2/training"
-    split1_train = "FreiHAND_pub_v2"
-    split2_train = "training"
-    split0_eval = "FreiHAND_pub_v2_eval/evaluation"
-    split1_eval = "FreiHAND_pub_v2_eval"
-    split2_eval = "evaluation"
-    mode_train = "train"
-    mode_eval = "eval"
-    batch_size = cfg.TRAIN.BATCH_SIZE
-    
-    from rlepose.datasets.lxd_freihand import Freihand_CustomDataset
-    gt_val_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
-                                                cfg, mode=mode_train)
-    #modi
-    # gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD) # 构建一个mscoco的对象，输入参数为
+    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD) # 构建一个mscoco的对象，输入参数为
     gt_val_sampler = torch.utils.data.distributed.DistributedSampler(
         gt_val_dataset, num_replicas=opt.world_size, rank=opt.rank)
 

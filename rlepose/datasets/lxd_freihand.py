@@ -105,10 +105,10 @@ class Freihand_CustomDataset(data.Dataset):
                  ):
         self._root_dir = cfg['root_dir']
         # self._root_dir = cfg['root_dir_autodl']
-        self._split0 = cfg['split0_train']
-        self._split1 = cfg['split1_train']
-        self._split2 = cfg['split2_train']
-        self._mode = cfg['mode_train']
+        self._split0 = cfg['split0']
+        self._split1 = cfg['split1']
+        self._split2 = cfg['split2']
+        self._mode = cfg['mode']
 
         self._items = read_data_file(self._root_dir, split=self._split0)
 

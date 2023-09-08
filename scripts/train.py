@@ -101,22 +101,21 @@ def main_worker(gpu, opt, cfg):
         optimizer, milestones=cfg.TRAIN.LR_STEP, gamma=cfg.TRAIN.LR_FACTOR)
 
     # modi1:use my own dataset - lxd Freihand_RLE
-    # train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
+    train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
     # modi start
-    from rlepose.datasets import Freihand_CustomDataset
-    root_dir = "/home/louxd/dataset/FreiHand"
-    split0_train = "FreiHAND_pub_v2/training"
-    split1_train = "FreiHAND_pub_v2"
-    split2_train = "training"
-    split0_eval = "FreiHAND_pub_v2_eval/evaluation"
-    split1_eval = "FreiHAND_pub_v2_eval"
-    split2_eval = "evaluation"
-    mode_train = "train"
-    mode_eval = "eval"
-    batch_size = cfg.TRAIN.BATCH_SIZE
-    
-    train_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
-                                                cfg, mode=mode_train)
+    # from rlepose.datasets import Freihand_CustomDataset
+    # root_dir = "/home/louxd/dataset/FreiHand"
+    # split0_train = "FreiHAND_pub_v2/training"
+    # split1_train = "FreiHAND_pub_v2"
+    # split2_train = "training"
+    # split0_eval = "FreiHAND_pub_v2_eval/evaluation"
+    # split1_eval = "FreiHAND_pub_v2_eval"
+    # split2_eval = "evaluation"
+    # mode_train = "train"
+    # mode_eval = "eval"
+    # batch_size = cfg.TRAIN.BATCH_SIZE
+    # train_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
+    #                                             cfg, mode=mode_train)
     # modi end
     print(f"modi1: load freidata.")
     train_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -129,8 +128,8 @@ def main_worker(gpu, opt, cfg):
     output_3d = cfg.DATA_PRESET.get('OUT_3D', False)
 
     # 这个东西后面算err有用，也不知道干嘛的
-    heatmap_to_coord = get_coord(cfg, cfg.DATA_PRESET.HEATMAP_SIZE, output_3d) # 别被骗了！跟heatmap没有半毛钱关系，只是将输出坐标转换到目标坐标
-    # 注意，这里坐标转换涉及到“heatmap坐标”？？？论文中有提到使用了heatmap的预训练参数，但坐标是怎么跟heatmap扯上关系的呢
+    heatmap_to_coord = get_coord(cfg, cfg.DATA_PRESET.HEATMAP_SIZE, output_3d) # 别被骗了！跟heatmap没有半毛钱关系，只是将模型推理的归一化坐标转换到输出坐标
+    # 注意，这里坐标转换涉及到“heatmap坐标”？？？论文中有提到使用了heatmap的预训练参数，但坐标是怎么跟heatmap扯上关系的呢---没关系的，名字唬人。跟hm没关系
 
     opt.trainIters = 0
     best_err = 999

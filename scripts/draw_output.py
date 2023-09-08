@@ -11,7 +11,7 @@ def paint(im, kpts):
     '''
     输入为单帧的im与其对应的一组kpts
     '''
-
+    
     colors = [[255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0], [85, 255, 0], [0, 255, 0], \
           [0, 255, 85], [0, 255, 170], [0, 255, 255], [0, 170, 255], [0, 85, 255], [0, 0, 255], \
           [128, 0, 128], [255, 192, 203], [0, 128, 128], [128, 128, 0], [128, 0, 0], [0, 128, 0], [0, 0, 128]]
@@ -22,6 +22,8 @@ def paint(im, kpts):
     for k in kpts:
         x = k[0]
         y = k[1]
+        print(f'im .shape = {im.shape}')
+        print(f'x={x}, y={y}')
         cv2.circle(im, (x, y), 2, (0, 0, 255), -1)
 
     # draw lines
@@ -106,7 +108,7 @@ def main():
     # print('Loading model from {}...'.format(opt.checkpoint))
     m.load_state_dict(torch.load(opt.checkpoint, map_location='cpu'), strict=True)  # 加载权重
 
-    m.cuda(opt.gpu)  # 把模型放到gpu中
+    m.cuda(device)  # 把模型放到gpu中
 
     draw_output(m, device)
 

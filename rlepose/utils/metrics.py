@@ -179,7 +179,7 @@ def calc_coord_accuracy(output, target, hm_shape, output_3d=False, num_joints=No
             label_masks = label_masks[:, :, :3].reshape(coords.shape[0], -1)
 
     if output_3d:
-        hm_width, hm_height, hm_depth = hm_shape
+        hm_width, hm_height, hm_depth = hm_shape # 48 * 64 * None
         coords = coords.reshape((coords.shape[0], -1, 3))
     else:
         hm_width, hm_height = hm_shape[:2]

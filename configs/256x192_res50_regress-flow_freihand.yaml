@@ -10,6 +10,17 @@ DATASET:
       SCALE_FACTOR: 0.25
       NUM_JOINTS_HALF_BODY: 3
       PROB_HALF_BODY: 0.3
+    root_dir: "/home/louxd/dataset/FreiHand"
+    root_dir_autodl: "/home/louxd/dataset/FreiHand"
+    split0_train: "FreiHAND_pub_v2/training"
+    split1_train: "FreiHAND_pub_v2"
+    split2_train: "training"
+    split0_eval: "FreiHAND_pub_v2_eval/evaluation"
+    split1_eval: "FreiHAND_pub_v2_eval"
+    split2_eval: "evaluation"
+    mode_train: "train"
+    mode_eval: "eval"
+
   VAL:
     TYPE: 'Freihand_CustomDataset'
     ROOT: ''

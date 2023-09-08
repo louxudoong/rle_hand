@@ -9,7 +9,7 @@ PORT=${4:-23456}
 
 HOST=$(hostname -i)
 
-python ./scripts/train.py \
+python ./scripts/draw_output.py \
     --nThreads 16 \
     --launcher pytorch --rank 0 \
     --dist-url tcp://${HOST}:${PORT} \

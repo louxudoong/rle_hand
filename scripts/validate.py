@@ -10,6 +10,7 @@ from rlepose.utils.transforms import get_coord
 num_gpu = torch.cuda.device_count()
 
 
+
 def main():
     if opt.launcher in ['none', 'slurm']:
         main_worker(None, opt, cfg)
@@ -53,6 +54,9 @@ def main_worker(gpu, opt, cfg):
         else:
             gt_AP = validate_gt(m, opt, cfg, heatmap_to_coord, opt.valid_batch)
             detbox_AP = validate(m, opt, cfg, heatmap_to_coord, opt.valid_batch)
+            # modi7: draw & save output
+            from rlepose.utils.lxd_draw_output import draw_paint
+            print(pose_coords.shape, inps.shape)
 
             if opt.log:
                 print('##### gt box: {} mAP | det box: {} mAP #####'.format(gt_AP, detbox_AP))

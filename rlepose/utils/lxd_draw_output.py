@@ -77,41 +77,20 @@ def draw_output(m, device):
 
         kpts = labels['target_uv'] # size * 42
 
-
-        optimizer.clear_grad()  # 梯度清零
-        heat1, heat2, heat3, heat4, heat5, heat6 = model(img, centermap)
-        loss1 = criterion(heat1, heatmap) * heat_weight
-        loss2 = criterion(heat2, heatmap) * heat_weight
-        loss3 = criterion(heat3, heatmap) * heat_weight
-        loss4 = criterion(heat4, heatmap) * heat_weight
-        loss5 = criterion(heat5, heatmap) * heat_weight
-        loss6 = criterion(heat6, heatmap) * heat_weight
-        loss = loss1 + loss2 + loss3 + loss4 + loss5 + loss6
-        loss.backward()  # 反向传播  
-        optimizer.step() # 更新模型参数，根据反向传播backward对模型进行更新
-        running_loss += loss.item()
-        run["train/loss"].append(loss.item())
-        if (batch_idx + 1) % 10 == 0:  # 每迭代10个批次打印一次损失
-            # if(running_loss <= cur_loss):
-            #     paddle.save(model.state_dict(), "cpm_init_params.pdparams")
-            print(f"Batch [{batch_idx+1}/{len(train_dataloader)}], Loss: {running_loss/10:.4f}")
-            running_loss = 0.0
-
         # print & draw
-        # if loss.item() < 1:
-        #     for i in range(len(img)):
-        #         if (i + 1) % 5 == 0:
-        #             #print(f'batch:{batch_idx}_{i}')
-        #             imgi = img[i].cpu().numpy()
-        #             heatmapi = heat6[i].cpu().numpy()
-        #             heatmapi_t = heatmap[i].cpu().numpy()
-        #             kptsi = get_kpts_from_heatmap(heatmapi, 368., 368.)
-        #             kptsi_t = get_kpts_from_heatmap(heatmapi_t, 368., 368.)
-        #             imagei = np.transpose(imgi, (1, 2, 0))
-        #             imagei = imagei * np.array([0.229, 0.224, 0.225], dtype=np.float32)*255 + np.array([0.485, 0.456, 0.406], dtype=np.float32)*255
-        #             imagei = imagei.copy()
-        #             imagei_t = imagei.copy()
-        #             draw_paint(imagei, kptsi)
-        #             draw_paint(imagei_t, kptsi_t)
-        #             cv2.imwrite(f'./output3/{batch_idx}_{i}.jpg', imagei)
-        #             cv2.imwrite(f'./output3/{batch_idx}_{i}_t.jpg', imagei_t)
+        for i in range(len(img)):
+            if (i + 1) % 5 == 0:
+                #print(f'batch:{batch_idx}_{i}')
+                imgi = img[i].cpu().numpy()
+                heatmapi = heat6[i].cpu().numpy()
+                heatmapi_t = heatmap[i].cpu().numpy()
+                kptsi = get_kpts_from_heatmap(heatmapi, 368., 368.)
+                kptsi_t = get_kpts_from_heatmap(heatmapi_t, 368., 368.)
+                imagei = np.transpose(imgi, (1, 2, 0))
+                imagei = imagei * np.array([0.229, 0.224, 0.225], dtype=np.float32)*255 + np.array([0.485, 0.456, 0.406], dtype=np.float32)*255
+                imagei = imagei.copy()
+                imagei_t = imagei.copy()
+                draw_paint(imagei, kptsi)
+                draw_paint(imagei_t, kptsi_t)
+                cv2.imwrite(f'./output3/{batch_idx}_{i}.jpg', imagei)
+                cv2.imwrite(f'./output3/{batch_idx}_{i}_t.jpg', imagei_t)

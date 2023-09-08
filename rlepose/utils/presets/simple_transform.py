@@ -57,11 +57,12 @@ class SimpleTransform(object):
         self.align_coord = True
 
         if train:
-            self.num_joints_half_body = dataset.num_joints_half_body
-            self.prob_half_body = dataset.prob_half_body
+            # self.num_joints_half_body = dataset.num_joints_half_body
+            # self.prob_half_body = dataset.prob_half_body
 
-            self.upper_body_ids = dataset.upper_body_ids
-            self.lower_body_ids = dataset.lower_body_ids
+            # self.upper_body_ids = dataset.upper_body_ids
+            # self.lower_body_ids = dataset.lower_body_ids
+            pass
 
     def test_transform(self, src, bbox):
         xmin, ymin, xmax, ymax = bbox
@@ -164,13 +165,13 @@ class SimpleTransform(object):
             xmin, ymin, xmax - xmin, ymax - ymin, self._aspect_ratio)
 
         # half body transform
-        if self._train and (np.sum(joints_vis[:, 0]) > self.num_joints_half_body and np.random.rand() < self.prob_half_body):
-            c_half_body, s_half_body = self.half_body_transform(
-                gt_joints[:, :, 0], joints_vis
-            )
+        # if self._train and (np.sum(joints_vis[:, 0]) > self.num_joints_half_body and np.random.rand() < self.prob_half_body):
+        #     c_half_body, s_half_body = self.half_body_transform(
+        #         gt_joints[:, :, 0], joints_vis
+        #     )
 
-            if c_half_body is not None and s_half_body is not None:
-                center, scale = c_half_body, s_half_body
+        #     if c_half_body is not None and s_half_body is not None:
+        #         center, scale = c_half_body, s_half_body
 
         # rescale
         if self._train:

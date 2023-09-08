@@ -41,12 +41,12 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
     # modi3: 
     # for i, (inps, labels, _, bboxes) in enumerate(train_loader):
 
-    # modi4: add neptune
-    import neptune
-    run = neptune.init_run(
-    project="louxudong1125/abc",
-    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJhMmI2YjAwMS0zMzhmLTQzZGMtYTI1OS0wYmYxZTdhOTU3NDUifQ==",
-)
+#     # modi4: add neptune
+#     import neptune
+#     run = neptune.init_run(
+#     project="louxudong1125/abc",
+#     api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJhMmI2YjAwMS0zMzhmLTQzZGMtYTI1OS0wYmYxZTdhOTU3NDUifQ==",
+# )
     
     for i, (inps, labels) in enumerate(train_loader):
         inps = inps.cuda()
@@ -83,8 +83,8 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
         opt.trainIters += 1
 
         # neptune
-        run["train/loss"].append(loss.item())
-        run["train/acc"].append(acc)
+        # run["train/loss"].append(loss.item())
+        # run["train/acc"].append(acc)
 
         if opt.log:
             # TQDM
@@ -102,6 +102,21 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
 
 def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
     #  创建dataset与dataloader
+    # root_dir = "/home/louxd/dataset/FreiHand"
+    # split0_train = "FreiHAND_pub_v2/training"
+    # split1_train = "FreiHAND_pub_v2"
+    # split2_train = "training"
+    # split0_eval = "FreiHAND_pub_v2_eval/evaluation"
+    # split1_eval = "FreiHAND_pub_v2_eval"
+    # split2_eval = "evaluation"
+    # mode_train = "train"
+    # mode_eval = "eval"
+    # batch_size = cfg.TRAIN.BATCH_SIZE
+    
+    # from rlepose.datasets.lxd_freihand import Freihand_CustomDataset
+    # det_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
+    #                                             cfg, mode=mode_train)
+    #modi
     det_dataset = builder.build_dataset(cfg.DATASET.TEST, preset_cfg=cfg.DATA_PRESET, train=False, opt=opt, heatmap2coord=cfg.TEST.HEATMAP2COORD)
     det_dataset_sampler = torch.utils.data.distributed.DistributedSampler(
         det_dataset, num_replicas=opt.world_size, rank=opt.rank)
@@ -176,7 +191,22 @@ def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
 
 
 def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
-    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD) # 构建一个mscoco的对象，输入参数为
+    root_dir = "/home/louxd/dataset/FreiHand"
+    split0_train = "FreiHAND_pub_v2/training"
+    split1_train = "FreiHAND_pub_v2"
+    split2_train = "training"
+    split0_eval = "FreiHAND_pub_v2_eval/evaluation"
+    split1_eval = "FreiHAND_pub_v2_eval"
+    split2_eval = "evaluation"
+    mode_train = "train"
+    mode_eval = "eval"
+    batch_size = cfg.TRAIN.BATCH_SIZE
+    
+    from rlepose.datasets.lxd_freihand import Freihand_CustomDataset
+    gt_val_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
+                                                cfg, mode=mode_train)
+    #modi
+    # gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD) # 构建一个mscoco的对象，输入参数为
     gt_val_sampler = torch.utils.data.distributed.DistributedSampler(
         gt_val_dataset, num_replicas=opt.world_size, rank=opt.rank)
 
@@ -226,13 +256,6 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
             data['keypoints'] = keypoints
 
             kpt_json.append(data)
-
-            # modi7: draw & save output
-            from rlepose.utils.lxd_draw_output import draw_paint
-            print(pose_coords.shape, inps.shape)
-            #draw_paint(inps[i], pose_coords)
-
-
 
 
 

@@ -306,9 +306,12 @@ def heatmap_to_coord(pred_jts, pred_scores, hm_shape, bbox, output_3d=False):
         pred_jts = pred_jts.unsqueeze(0)
         pred_scores = pred_scores.unsqueeze(0)
 
-    coords = pred_jts.cpu().numpy()
+    # modi: detach tensor
+    # coords = pred_jts.cpu().numpy()
+    coords = pred_jts.clone().detach().cpu().numpy()
     coords = coords.astype(float)
-    pred_scores = pred_scores.cpu().numpy()
+    # pred_scores = pred_scores.cpu().numpy()
+    pred_scores = pred_scores.clone().detach().cpu().numpy()
     pred_scores = pred_scores.astype(float)
 
     coords[:, :, 0] = (coords[:, :, 0] + 0.5) * hm_width

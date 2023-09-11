@@ -101,22 +101,7 @@ def train(opt, cfg, train_loader, m, criterion, optimizer):
 
 
 def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
-    #  创建dataset与dataloader
-    # root_dir = "/home/louxd/dataset/FreiHand"
-    # split0_train = "FreiHAND_pub_v2/training"
-    # split1_train = "FreiHAND_pub_v2"
-    # split2_train = "training"
-    # split0_eval = "FreiHAND_pub_v2_eval/evaluation"
-    # split1_eval = "FreiHAND_pub_v2_eval"
-    # split2_eval = "evaluation"
-    # mode_train = "train"
-    # mode_eval = "eval"
-    # batch_size = cfg.TRAIN.BATCH_SIZE
-    
-    # from rlepose.datasets.lxd_freihand import Freihand_CustomDataset
-    # det_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
-    #                                             cfg, mode=mode_train)
-    #modi
+
     det_dataset = builder.build_dataset(cfg.DATASET.TEST, preset_cfg=cfg.DATA_PRESET, train=False, opt=opt, heatmap2coord=cfg.TEST.HEATMAP2COORD)
     det_dataset_sampler = torch.utils.data.distributed.DistributedSampler(
         det_dataset, num_replicas=opt.world_size, rank=opt.rank)
@@ -189,9 +174,10 @@ def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
     else:
         return 0
 
+from rlepose.utils.cal_mAP_lxd import cal_mAP_RMSE
 
 def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
-    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD) # 构建一个mscoco的对象，输入参数为
+    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD)
     gt_val_sampler = torch.utils.data.distributed.DistributedSampler(
         gt_val_dataset, num_replicas=opt.world_size, rank=opt.rank)
 
@@ -206,67 +192,72 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
     if opt.log:
         gt_val_loader = tqdm(gt_val_loader, dynamic_ncols=True)
 
-    for inps, labels, img_ids, bboxes in gt_val_loader:
+    # for inps, labels, img_ids, bboxes in gt_val_loader:
+    # modi: adjust for freihand dataset
+    for inps, labels in gt_val_loader:
+        # bboxes = labels.pop('bbox')
         inps = inps.cuda()
         output = m(inps)
+        prejts = output.pred_jts
+        gts = labels['target_uv']
+
+        mAP_str, RMSE = cal_mAP_RMSE(prejts, gts)
+        return mAP_str['AP'], RMSE
 
         # 如果需要翻转测试，则进行输入翻转和输出融合
-        if opt.flip_test:
-            inps_flipped = flip(inps).cuda()
-            output_flipped = flip_output(
-                m(inps_flipped), gt_val_dataset.joint_pairs,
-                width_dim=hm_size[1], shift=flip_shift)
-            for k in output.keys():
-                if isinstance(output[k], list):
-                    continue
-                if output[k] is not None:
-                    output[k] = (output[k] + output_flipped[k]) / 2
+        # if opt.flip_test:
+        #     inps_flipped = flip(inps).cuda()
+        #     output_flipped = flip_output(
+        #         m(inps_flipped), gt_val_dataset.joint_pairs,
+        #         width_dim=hm_size[1], shift=flip_shift)
+        #     for k in output.keys():
+        #         if isinstance(output[k], list):
+        #             continue
+        #         if output[k] is not None:
+        #             output[k] = (output[k] + output_flipped[k]) / 2
 
          # 处理每个输入图像的输出结果
-        for i in range(inps.shape[0]): # batch_size
-            bbox = bboxes[i].tolist()
-            pose_coords, pose_scores = heatmap_to_coord(
-                output, bbox, idx=i)
+    #     for i in range(inps.shape[0]): # batch_size
+    #         bbox = bboxes[i].tolist()
+    #         pose_coords, pose_scores = heatmap_to_coord(
+    #             output, bbox, idx=i)
 
-            # 将关键点坐标和得分拼接成一个数组
-            keypoints = np.concatenate((pose_coords[0], pose_scores[0]), axis=1)
-            keypoints = keypoints.reshape(-1).tolist()
+    #         # 将关键点坐标和得分拼接成一个数组
+    #         keypoints = np.concatenate((pose_coords[0], pose_scores[0]), axis=1)
+    #         keypoints = keypoints.reshape(-1).tolist()
 
-            # 构建关键点结果字典
-            data = dict()
-            data['bbox'] = bboxes[i].tolist()
-            data['image_id'] = int(img_ids[i])
-            data['score'] = float(np.mean(pose_scores) + np.max(pose_scores))
-            data['category_id'] = 1
-            data['keypoints'] = keypoints
+    #         # 构建关键点结果字典
+    #         data = dict()
+    #         data['bbox'] = bboxes[i].tolist()
+    #         # data['image_id'] = int(img_ids[i])
+    #         data['image_id'] = int(-1)
+    #         data['score'] = float(np.mean(pose_scores) + np.max(pose_scores))
+    #         data['category_id'] = 1
+    #         data['keypoints'] = keypoints
 
-            kpt_json.append(data)
+    #         kpt_json.append(data)
 
 
+    # with open(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{opt.rank}.pkl'), 'wb') as fid:
+    #     pk.dump(kpt_json, fid, pk.HIGHEST_PROTOCOL)
 
-    
+    # torch.distributed.barrier()  # Make sure all JSON files are saved
 
-    with open(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{opt.rank}.pkl'), 'wb') as fid:
-        pk.dump(kpt_json, fid, pk.HIGHEST_PROTOCOL)
+    # if opt.rank == 0:
+    #     kpt_json_all = []
+    #     for r in range(opt.world_size):
+    #         with open(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{r}.pkl'), 'rb') as fid:
+    #             kpt_pred = pk.load(fid)
 
-    torch.distributed.barrier()  # Make sure all JSON files are saved
+    #         os.remove(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{r}.pkl'))
+    #         kpt_json_all += kpt_pred
 
-    # # 合并所有进程的结果并进行非极大值抑制
-    if opt.rank == 0:
-        kpt_json_all = []
-        for r in range(opt.world_size):
-            with open(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{r}.pkl'), 'rb') as fid:
-                kpt_pred = pk.load(fid)
-
-            os.remove(os.path.join(opt.work_dir, f'test_gt_kpt_rank_{r}.pkl'))
-            kpt_json_all += kpt_pred
-
-        with open(os.path.join(opt.work_dir, 'test_gt_kpt.json'), 'w') as fid:
-            json.dump(kpt_json_all, fid)
-        res = evaluate_mAP(os.path.join(opt.work_dir, 'test_gt_kpt.json'), ann_type='keypoints')
-        return res['AP']
-    else:
-        return 0
+    #     with open(os.path.join(opt.work_dir, 'test_gt_kpt.json'), 'w') as fid:
+    #         json.dump(kpt_json_all, fid)
+    #     res = evaluate_mAP(os.path.join(opt.work_dir, 'test_gt_kpt.json'), ann_type='keypoints')
+    #     return res['AP']
+    # else:
+    #     return 0
 
 
 def validate_gt_3d(m, opt, cfg, heatmap_to_coord, batch_size=20):

@@ -83,9 +83,8 @@ def main_worker(gpu, opt, cfg):
 
     # modi5: add pre-trained weights
     load_weights = cfg.TRAIN.get('PRE_TRAINED', False) # ture in cfg
-    if load_weights:
-        print(f'Loading rel pre-trained weights from {opt.checkpoint}...')
-        m.load_state_dict(torch.load(opt.checkpoint, map_location='cpu'), strict=True)  # 加载权重
+    print(f'Loading rel pre-trained weights from {opt.checkpoint}...')
+    m.load_state_dict(torch.load("/root/ldlib/rle_hand/exp/train_rle_freihand-256x192_res50_regress-flow_freihand.yaml/model_0.pth", map_location='cpu'), strict=True) 
 
     m.cuda(opt.gpu)
     m = torch.nn.parallel.DistributedDataParallel(m, device_ids=[opt.gpu])  # 进行分布式训练
@@ -102,7 +101,7 @@ def main_worker(gpu, opt, cfg):
 
     # modi1:use my own dataset - lxd Freihand_RLE
     train_dataset = builder.build_dataset(cfg.DATASET.TRAIN, preset_cfg=cfg.DATA_PRESET, train=True, heatmap2coord=cfg.TEST.HEATMAP2COORD)
-    print(f"load freihand dataset.")
+    print(f"modi1: load freidata.")
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset, num_replicas=opt.world_size, rank=opt.rank)
     train_loader = torch.utils.data.DataLoader(
@@ -126,37 +125,8 @@ def main_worker(gpu, opt, cfg):
         current_lr = optimizer.state_dict()['param_groups'][0]['lr']
 
         logger.info(f'############# Starting Epoch {opt.epoch} | LR: {current_lr} #############')
-
-        # Training
-        loss, acc = train(opt, cfg, train_loader, m, criterion, optimizer)
-        logger.epochInfo('Train', opt.epoch, loss, acc)
-
-        lr_scheduler.step()
-
-        if (i + 1) % opt.snapshot == 0: # snapshot default = 1
-            # Save checkpoint
-            if opt.log:
-                print(f"save weights at epoch {opt.epoch}")
-                torch.save(m.module.state_dict(), './exp/{}-{}/model_{}.pth'.format(opt.exp_id, cfg.FILE_NAME, opt.epoch))
-            # Prediction Test
-            with torch.no_grad():
-                if output_3d:
-                    err = validate_gt_3d(m, opt, cfg, heatmap_to_coord)
-                    if opt.log and err <= best_err:
-                        best_err = err
-                        torch.save(m.module.state_dict(), './exp/{}-{}/best_model.pth'.format(opt.exp_id, cfg.FILE_NAME))
-
-                    logger.info(f'##### Epoch {opt.epoch} | gt results: {err}/{best_err} #####')
-
-                else:
-                    gt_AP, rmse = validate_gt(m, opt, cfg, heatmap_to_coord)
-                    # det_AP = validate(m, opt, cfg, heatmap_to_coord)
-                    # logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | det mAP: {det_AP} #####')
-                    logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | rmse: {rmse} #####')
-
-        torch.distributed.barrier()  # Sync
-    torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))
-    print(f"save final weights.")
+        gt_AP = validate_gt(m, opt, cfg, heatmap_to_coord)
+        logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} #####')
 
 def preset_model(cfg):
     model = builder.build_sppe(cfg.MODEL, preset_cfg=cfg.DATA_PRESET)

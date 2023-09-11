@@ -48,6 +48,9 @@ def read_mat_file(root_dir, split1, split2, img_list):
     Notice:
     在train数据集中，label的样本数为img的1/4，for循环以label的length为准
     '''
+    print(f"anno_xyz len： {len(anno_xyz)}")
+    print(f"anno_K len： {len(anno_K)}")
+    print(f"img list len： {len(img_list)}")
     for idx in range(len(anno_xyz)):
         xyz = np.array(anno_xyz[idx])
         K = np.array(anno_K[idx])

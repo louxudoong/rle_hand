@@ -5,7 +5,6 @@ import torch
 from rlepose.opt import cfg, logger, opt
 import torch
 from rlepose.models import builder
-from rlepose.opt import cfg, opt
 
 def paint(im, kpts):
     '''
@@ -20,16 +19,18 @@ def paint(im, kpts):
     # im = cv2.imread(img_path)
     # draw points
     for k in kpts:
-        x = k[0]
-        y = k[1]
-        print(f'im .shape = {im.shape}')
-        print(f'x={x}, y={y}')
+        x = int(k[0])
+        y = int(k[1])
+        # print(f'im .shape = {im.shape}')
+        # print(f'x={x}, y={y}')
         cv2.circle(im, (x, y), 2, (0, 0, 255), -1)
 
     # draw lines
+    # print("kpts shape: ", kpts)
     for i in range(len(limbSeq)):
         cur_im = im.copy()
         limb = limbSeq[i]
+        # print(kpts[limb[0]])
         [Y0, X0] = kpts[limb[0]]
         [Y1, X1] = kpts[limb[1]]
         mX = np.mean([X0, X1])
@@ -45,26 +46,16 @@ def paint(im, kpts):
 
 def draw_output(m, device):
     from rlepose.datasets import Freihand_CustomDataset
-    root_dir = "/home/louxd/dataset/FreiHand"
-    split0_train = "FreiHAND_pub_v2/training"
-    split1_train = "FreiHAND_pub_v2"
-    split2_train = "training"
-    split0_eval = "FreiHAND_pub_v2_eval/evaluation"
-    split1_eval = "FreiHAND_pub_v2_eval"
-    split2_eval = "evaluation"
-    mode_train = "train"
-    mode_eval = "eval"
-    batch_size = cfg.TRAIN.BATCH_SIZE
-    
-    train_dataset = Freihand_CustomDataset(root_dir, split0_train, split1_train, split2_train,
-                                                cfg, mode=mode_train)
-    train_sampler = torch.utils.data.distributed.DistributedSampler(
-        train_dataset, num_replicas=opt.world_size, rank=opt.rank)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=(train_sampler is None), num_workers=opt.nThreads, 
-        sampler=train_sampler)
+    gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD)
+    gt_val_sampler = torch.utils.data.distributed.DistributedSampler(
+        gt_val_dataset, num_replicas=opt.world_size, rank=opt.rank)
 
-    for index, (inps, labels) in enumerate(train_loader):
+    gt_val_loader = torch.utils.data.DataLoader(
+        gt_val_dataset, batch_size=16, shuffle=False, num_workers=20, drop_last=False, sampler=gt_val_sampler)
+    
+    
+
+    for index, (inps, labels) in enumerate(gt_val_loader):
         inps = inps.cuda(device)
 
         for k, _ in labels.items():
@@ -80,24 +71,28 @@ def draw_output(m, device):
         else:
             batch_size = inps.size(0)
 
-        kpts = labels['target_uv'].view(32, 21, 2) # size * 42
-        kpts_t = output.pred_jts
+        kpts_pre = labels['target_uv'].cpu().numpy().reshape(-1, 21, 2) # size * 42
+        print(kpts_pre.shape())
+        kpts_gt = output.pred_jts.cpu().numpy().reshape(-1, 21, 2)
 
         # print & draw
         for i in range(len(inps)):
             if i == 0:
                 #print(f'batch:{batch_idx}_{i}')
                 imgi = inps[i].cpu().numpy()
-                kptsi = kpts[i]
-                kptsi_t = kpts_t[i]
-                imagei = np.transpose(imgi, (1, 2, 0))
-                imagei = imagei * np.array([0.229, 0.224, 0.225], dtype=np.float32)*255 + np.array([0.485, 0.456, 0.406], dtype=np.float32)*255
-                imagei = imagei.copy()
-                imagei_t = imagei.copy()
-                imagei = paint(imagei, kptsi)
-                imagei_t = paint(imagei_t, kptsi_t)
-                cv2.imwrite(f'./output3/{index}_{i}.jpg', imagei)
-                cv2.imwrite(f'./output3/{index}_{i}_t.jpg', imagei_t)
+                imgi = np.transpose(imgi, (1, 2, 0))
+                imgi = (imgi + np.array([0.480, 0.457, 0.406], dtype=np.float32))  * np.array([255., 255., 255.], dtype=np.float32)
+                imgi = cv2.cvtColor(imgi, cv2.COLOR_BGR2RGB) 
+                img_h, img_w, _ = imgi.shape
+                kpts_pre_i = np.array([(kpt + [0.5, 0.5]) * [img_w, img_h] for kpt in kpts_pre[i]])
+                kpts_gt_i = np.array([(kpt + [0.5, 0.5]) * [img_w, img_h] for kpt in kpts_gt[i]])
+
+                imagei_pre = imgi.copy()
+                imagei_gt = imgi.copy()
+                imagei_pre = paint(imagei_pre, kpts_pre_i)
+                imagei_gt = paint(imagei_gt, kpts_gt_i)
+                cv2.imwrite(f'./exp/output_114/{index}_{i}_pre.jpg', imagei_pre)
+                cv2.imwrite(f'./exp/output_114/{index}_{i}_gt.jpg', imagei_gt)
 
 
 def main():
@@ -110,7 +105,8 @@ def main():
 
     m.cuda(device)  # 把模型放到gpu中
 
-    draw_output(m, device)
+    with torch.no_grad():
+        draw_output(m, device)
 
 
 if __name__ == "__main__":

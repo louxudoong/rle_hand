@@ -16,7 +16,7 @@ def build(cfg, registry, default_args=None):
         ]
         return nn.Sequential(*modules)
     else:
-        print('build single from cfg.')
+        # print('build single from cfg.')
         return build_from_cfg(cfg, registry, default_args)
 
 

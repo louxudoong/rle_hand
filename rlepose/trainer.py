@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from torch.nn.utils import clip_grad
 from tqdm import tqdm
+import cv2
+import math
 
 from rlepose.models import builder
 from rlepose.utils.metrics import DataLogger, calc_accuracy, calc_coord_accuracy, evaluate_mAP
@@ -173,8 +175,7 @@ def validate(m, opt, cfg, heatmap_to_coord, batch_size=20, use_nms=False):
         return res['AP']
     else:
         return 0
-
-from rlepose.utils.cal_mAP_lxd import cal_mAP_RMSE
+    
 
 def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
     gt_val_dataset = builder.build_dataset(cfg.DATASET.VAL, preset_cfg=cfg.DATA_PRESET, train=False, heatmap2coord=cfg.TEST.HEATMAP2COORD)
@@ -192,17 +193,75 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
     if opt.log:
         gt_val_loader = tqdm(gt_val_loader, dynamic_ncols=True)
 
+    device = torch.device('cuda')
+
+    rmse_list = []
+    oks_list = []
+
+    from rlepose.utils.valid_utils_lxd import compute_RMSE, calculate_oks_pt2, paint, calculate_mAP
+
+    for index, (inps, labels) in enumerate(gt_val_loader):
+        inps = inps.cuda(device)
+
+        for k, _ in labels.items():
+            if k == 'type':
+                continue
+            
+            labels[k] = labels[k].cuda(device)
+
+        output = m(inps, labels)
+
+        if isinstance(inps, list):
+            batch_size = inps[0].size(0)
+        else:
+            batch_size = inps.size(0)
+
+        kpts_pre = labels['target_uv'].cpu().numpy().reshape(-1, 21, 2) # size * 42
+        kpts_gt = output.pred_jts.cpu().numpy().reshape(-1, 21, 2)
+
+        # valid & draw
+        for i in range(len(inps)):
+
+            kpts_pre_i = np.array([(kpt + [0.5, 0.5]) * [img_w, img_h] for kpt in kpts_pre[i]])
+            kpts_gt_i = np.array([(kpt + [0.5, 0.5]) * [img_w, img_h] for kpt in kpts_gt[i]])
+
+            rmse_i = compute_RMSE(kpts_pre_i, kpts_gt_i)
+            oks_i = calculate_oks_pt2(kpts_pre_i, kpts_gt_i)
+
+            rmse_list.append(rmse_i)
+            oks_list.append(oks_i)
+
+            if i == 0 & cfg.VAL.paint:
+                print(f'********************* DRAW OUTPUT **********************')
+                imgi = inps[i].cpu().numpy()
+                imgi = np.transpose(imgi, (1, 2, 0))
+                imgi = (imgi + np.array([0.480, 0.457, 0.406], dtype=np.float32))  * np.array([255., 255., 255.], dtype=np.float32)
+                imgi = cv2.cvtColor(imgi, cv2.COLOR_BGR2RGB) 
+                img_h, img_w, _ = imgi.shape
+
+
+                imagei_pre = imgi.copy()
+                imagei_gt = imgi.copy()
+                imagei_pre = paint(imagei_pre, kpts_pre_i)
+                imagei_gt = paint(imagei_gt, kpts_gt_i)
+                cv2.imwrite(f'./exp/output_114/{index}_{i}_pre.jpg', imagei_pre)
+                cv2.imwrite(f'./exp/output_114/{index}_{i}_gt.jpg', imagei_gt)
+    
+    rmse = sum(rmse_list) / len(rmse_list)
+    mAP_info_str = calculate_mAP(oks_list)
+
+    return mAP_info_str['mAP'], rmse
     # for inps, labels, img_ids, bboxes in gt_val_loader:
     # modi: adjust for freihand dataset
-    for inps, labels in gt_val_loader:
-        # bboxes = labels.pop('bbox')
-        inps = inps.cuda()
-        output = m(inps)
-        prejts = output.pred_jts
-        gts = labels['target_uv']
+    # for inps, labels in gt_val_loader:
+    #     # bboxes = labels.pop('bbox')
+    #     inps = inps.cuda()
+    #     output = m(inps)
+    #     prejts = output.pred_jts
+    #     gts = labels['target_uv']
 
-        mAP_str, RMSE = cal_mAP_RMSE(prejts, gts)
-        return mAP_str['AP'], RMSE
+    #     mAP_str, RMSE = cal_mAP_RMSE(prejts, gts)
+    #     return mAP_str['AP'], RMSE
 
         # 如果需要翻转测试，则进行输入翻转和输出融合
         # if opt.flip_test:

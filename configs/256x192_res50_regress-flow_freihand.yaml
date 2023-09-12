@@ -27,6 +27,7 @@ DATASET:
     split1: "FreiHAND_pub_v2_eval"
     split2: "evaluation"
     mode: "eval"
+    paint: true
   TEST:
     TYPE: 'Freihand_CustomDataset'
     ROOT: ''

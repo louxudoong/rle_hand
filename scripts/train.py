@@ -149,10 +149,10 @@ def main_worker(gpu, opt, cfg):
                     logger.info(f'##### Epoch {opt.epoch} | gt results: {err}/{best_err} #####')
 
                 else:
-                    gt_AP, rmse = validate_gt(m, opt, cfg, heatmap_to_coord)
+                    gt_mAP, rmse = validate_gt(m, opt, cfg, heatmap_to_coord)
                     # det_AP = validate(m, opt, cfg, heatmap_to_coord)
                     # logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | det mAP: {det_AP} #####')
-                    logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_AP} | rmse: {rmse} #####')
+                    logger.info(f'##### Epoch {opt.epoch} | gt mAP: {gt_mAP} | rmse: {rmse} #####')
 
         torch.distributed.barrier()  # Sync
     torch.save(m.module.state_dict(), './exp/{}-{}/final.pth'.format(opt.exp_id, cfg.FILE_NAME))

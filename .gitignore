@@ -11,6 +11,7 @@ data/
 weights/
 .neptune/
 rlepose.egg-info/
+exp/
 
 
 # Distribution / packaging

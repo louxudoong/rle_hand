@@ -5,14 +5,14 @@ import math
 
 def compute_RMSE(kpts_pred, kpts_t):
     # 求解每个关键点的坐标差异的平方和
-    squared_errors = np.sum(np.square(np.array(kpts_t) - np.array(kpts_pred)), axis=1)
+    squared_errors = np.sum(np.square(np.array(kpts_t) - np.array(kpts_pred)), axis=0)
 
     # 计算均方根误差
     RMSE = np.sqrt(np.mean(squared_errors))
 
     return RMSE
 
-# 要求输入为size * n * 2的kpts
+# 要求输入为n * 2的kpts
 def calculate_oks_pt2(kpts_pred, kpts_true):
 
     assert kpts_pred.shape == kpts_true.shape, "Keypoints shape mismatch"

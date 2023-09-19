@@ -12,6 +12,8 @@ weights/
 .neptune/
 rlepose.egg-info/
 exp/
+test_mediapipe/output/
+yolo_v3/
 
 
 # Distribution / packaging

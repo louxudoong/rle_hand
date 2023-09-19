@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from ..bbox import _box_to_center_scale, _center_scale_to_box
-from ..transforms import (affine_transform, flip_joints_3d,
+from ..transforms import (affine_transform, flip_joints_3d, 
                           get_affine_transform, im_to_torch)
 
 

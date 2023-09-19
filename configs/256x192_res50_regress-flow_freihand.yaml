@@ -67,4 +67,4 @@ TRAIN:
   LR_STEP:
   - 170
   - 200
-  PRE_TRAINED: false
+  PRE_TRAINED: true

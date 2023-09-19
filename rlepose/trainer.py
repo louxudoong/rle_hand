@@ -10,6 +10,7 @@ import cv2
 import math
 
 from rlepose.models import builder
+from rlepose.utils.valid_utils_lxd import calculate_error_distance_avg, calculate_RMSE, calculate_PCK, paint
 from rlepose.utils.metrics import DataLogger, calc_accuracy, calc_coord_accuracy, evaluate_mAP
 from rlepose.utils.nms import oks_pose_nms
 from rlepose.utils.transforms import flip, flip_output
@@ -196,9 +197,10 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
     device = torch.device('cuda')
 
     rmse_list = []
-    oks_list = []
+    pck_pix = []
+    pck_norm = []
+    err_pix = []
 
-    from rlepose.utils.valid_utils_lxd import compute_RMSE, calculate_oks_pt2, paint, calculate_mAP
 
     for index, (inps, labels) in enumerate(gt_val_loader):
         inps = inps.cuda(device)
@@ -225,11 +227,13 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
             kpts_pre_i = np.array([(kpt + [0.5, 0.5]) * [img_w, img_h] for kpt in kpts_pre[i]])
             kpts_gt_i = np.array([(kpt + [0.5, 0.5]) * [img_w, img_h] for kpt in kpts_gt[i]])
 
-            rmse_i = compute_RMSE(kpts_pre_i, kpts_gt_i)
-            oks_i = calculate_oks_pt2(kpts_pre_i, kpts_gt_i)
-
+            _, rmse_i = calculate_RMSE(kpts_pre_i, kpts_gt_i)
+            pck_pix_i, pck_norm_i = calculate_PCK(kpts_pre_i, kpts_gt_i)
+            err_pix_i = calculate_error_distance_avg(kpts_pre_i, kpts_gt_i)
             rmse_list.append(rmse_i)
-            oks_list.append(oks_i)
+            pck_pix.append(pck_pix_i)
+            pck_norm.append(pck_norm_i)
+            err_pix.append(err_pix_i)
 
             if i == 0 & cfg.VAL.paint:
                 print(f'********************* DRAW OUTPUT **********************')
@@ -244,13 +248,15 @@ def validate_gt(m, opt, cfg, heatmap_to_coord, batch_size=20):
                 imagei_gt = imgi.copy()
                 imagei_pre = paint(imagei_pre, kpts_pre_i)
                 imagei_gt = paint(imagei_gt, kpts_gt_i)
-                cv2.imwrite(f'./exp/output_114/{index}_{i}_pre.jpg', imagei_pre)
-                cv2.imwrite(f'./exp/output_114/{index}_{i}_gt.jpg', imagei_gt)
+                # cv2.imwrite(f'./exp/output_114/{index}_{i}_pre.jpg', imagei_pre)
+                # cv2.imwrite(f'./exp/output_114/{index}_{i}_gt.jpg', imagei_gt)
     
     rmse = sum(rmse_list) / len(rmse_list)
-    mAP_info_str = calculate_mAP(oks_list)
+    pck_pix = np.mean(pck_pix, axis=0)
+    pck_norm = np.mean(pck_norm, axis=0)
+    err_pix = np.mean(err_pix)
 
-    return mAP_info_str['mAP'], rmse
+    return rmse, pck_pix, pck_norm, err_pix
     # for inps, labels, img_ids, bboxes in gt_val_loader:
     # modi: adjust for freihand dataset
     # for inps, labels in gt_val_loader:

@@ -3,27 +3,77 @@ import matplotlib.pyplot as plt
 import cv2
 import math
 
-def compute_RMSE(kpts_pred, kpts_t):
+def remove_zero_points(kpts_pred, kpts_t):
+    # 找到值为0的点的索引
+    zero_indices = np.where((kpts_pred == 0).any(axis=1) | (kpts_t == 0).any(axis=1))[0]
+    
+    # 将值为0的点从两组点中剔除
+    kpts_pred = np.delete(kpts_pred, zero_indices, axis=0)
+    kpts_t = np.delete(kpts_t, zero_indices, axis=0)
+    
+    return kpts_pred, kpts_t
+
+def calculate_RMSE(kpts_pred, kpts_t):
     # 求解每个关键点的坐标差异的平方和
+    kpts_pred, kpts_t = remove_zero_points(kpts_pred, kpts_t)
     squared_errors = np.sum(np.square(np.array(kpts_t) - np.array(kpts_pred)), axis=0)
 
     # 计算均方根误差
-    RMSE = np.sqrt(np.mean(squared_errors))
+    MSE = np.mean(squared_errors)
+    RMSE = np.sqrt(MSE)
 
-    return RMSE
+    return MSE, RMSE
+
+def calculate_error_distance_avg(kpts_pred, kpts_t):
+    kpts_pred, kpts_t = remove_zero_points(kpts_pred, kpts_t)
+    # 计算 num_joints * 2 的像素误差距离
+    num_joints = kpts_pred.shape[0]
+    error_distance = np.sqrt(np.sum((kpts_pred - kpts_t) ** 2, axis=1))
+    error_distance_avg = np.sum(error_distance) / num_joints
+    
+    return error_distance_avg
+
+
+def calculate_PCK(kpts_pred, kpts_t):
+    kpts_pred, kpts_t = remove_zero_points(kpts_pred, kpts_t)
+    assert kpts_pred.shape == kpts_t.shape, "Keypoints shape mismatch"
+    max_x = np.max(kpts_t[:, 0])
+    min_x = np.min(kpts_t[:, 0])
+    max_y = np.max(kpts_t[:, 1])
+    min_y = np.min(kpts_t[:, 1])
+    norm = np.max([int(max_x - min_x), int(max_y - min_y)])
+    num_joints = kpts_pred.shape[0]
+    error_distance = np.sqrt(np.sum((kpts_pred - kpts_t) ** 2, axis=1))
+    norm_distance = error_distance / norm
+
+    pixel_thresholds = np.arange(0, 30, 1)
+    norm_thresholds = np.arange(0, 1, 0.05)
+
+    pixel_correct = np.zeros(len(pixel_thresholds))
+    norm_correct = np.zeros(len(norm_thresholds))
+
+    for i, pixel_thresh in enumerate(pixel_thresholds):
+        pixel_correct[i] = np.sum(error_distance <= pixel_thresh) / num_joints
+
+    for i, norm_thresh in enumerate(norm_thresholds):
+        norm_correct[i] = np.sum(norm_distance <= norm_thresh) / num_joints
+
+    
+    return pixel_correct, norm_correct
 
 # 要求输入为n * 2的kpts
 def calculate_oks_pt2(kpts_pred, kpts_true):
+    kpts_pred, kpts_t = remove_zero_points(kpts_pred, kpts_t)
 
     assert kpts_pred.shape == kpts_true.shape, "Keypoints shape mismatch"
-    oks = []
     K = kpts_pred.shape[0]   # joints_num
-    max_x = np.max(kpts_pred[:, 0])
-    min_x = np.min(kpts_pred[:, 0])
-    max_y = np.max(kpts_pred[:, 1])
-    min_y = np.min(kpts_pred[:, 1])
+    max_x = np.max(kpts_true[:, 0])
+    min_x = np.min(kpts_true[:, 0])
+    max_y = np.max(kpts_true[:, 1])
+    min_y = np.min(kpts_true[:, 1])
     
     s2 = (max_x - min_x)**2 + (max_y - min_y)**2
+    # s2 = ((max_x - min_x)**2 + (max_y - min_y)**2) / 2.
     k2 = 1
     exp_term = np.exp(-np.sum((kpts_pred - kpts_true)**2, axis=1) / (2 * s2 * k2))
     oks = np.sum(exp_term) / K
@@ -89,7 +139,7 @@ def cal_mAP_RMSE(kpts_pred, kpts_t):
     # kpts_pred = kpts_pred.cpu().detach().reshape(kpts_pred.shape[0], 21, 2)
     # kpts_t = kpts_t.cpu().detach().reshape(kpts_pred.shape[0], 21, 2)
     
-    RMSE = compute_RMSE(kpts_pred, kpts_t)
+    RMSE = calculate_RMSE(kpts_pred, kpts_t)
     oks = calculate_oks_pt2(np.array(kpts_pred), np.array(kpts_t))
     mAP_info_str = calculate_mAP(oks)
 

@@ -19,6 +19,8 @@ from yolo_v3.utils.parse_config import parse_data_cfg
 from yolo_v3.yolov3 import Yolov3, Yolov3Tiny
 from yolo_v3.utils.torch_utils import select_device
 
+from rlepose.utils.lxd_lk_tracker import LK_Tracker, improved_LK_Tracker
+
 def process_data(img, img_size=416):# 图像预处理
     img, _, _, _ = letterbox(img, height=img_size)
     # Normalize RGB
@@ -116,6 +118,7 @@ def get_affine_transform(center,
 
 def yolo_detect(
         rle_cfg,
+        rle_weights,
         yolo_model_path,
         yolo_cfg,
         yolo_data_cfg,
@@ -137,7 +140,7 @@ def yolo_detect(
     # rle
     rle_module = builder.build_sppe(rle_cfg.MODEL, preset_cfg=rle_cfg.DATA_PRESET)  # 根据cfg的配置信息构建模型
 
-    rle_module.load_state_dict(torch.load(".//weights//model_114.pth", map_location='cpu'), 
+    rle_module.load_state_dict(torch.load(rle_weights, map_location='cpu'), 
                     strict=True)  # 加载权重
     
     rle_module.to(device).eval()#模型模式设置为 eval
@@ -185,6 +188,9 @@ def yolo_detect(
     # 创建摄像头对象
     cap = cv2.VideoCapture(0)
     count = 0
+    track_vis = None
+    track_prev_gray = None
+    last_tracks = []
 
     while True:
         # 读取摄像头捕获的一帧图像
@@ -203,7 +209,7 @@ def yolo_detect(
             pred, _ = yolo_model(img) #yolo prediction, 注意，这里输入模型的为
             time2 = time.time()
             yolo_cost = (time2 - time1) * 1000
-            print("yolo pre cost: ", yolo_cost)
+            # print("yolo pre cost: ", yolo_cost)
             if (yolo_cost < 20):
                 yolo_pre_time.append(yolo_cost)
 
@@ -219,7 +225,7 @@ def yolo_detect(
                 cv2.namedWindow('yolo',0)
                 cv2.imshow("yolo", display_img)
                 key = cv2.waitKey(1)
-                print("yolo prediction fail.")
+                # print("yolo prediction fail.")
                 if key == 27:
                     break
                 continue
@@ -286,6 +292,50 @@ def yolo_detect(
                     inps = cv2.warpAffine(inps, trans, (int(inp_w), int(inp_h)), flags=cv2.INTER_LINEAR)
                     cv2.namedWindow(f"trans_img_{hand_num}")
                     cv2.imshow(f"trans_img_{hand_num}", inps)
+
+                    # add LK-Tracker
+                    roi_w = xmax - xmin
+                    roi_h = ymax - ymin
+                    track_vis, track_prev_gray, last_tracks, motion, p1, p0 = LK_Tracker(inps, count, last_tracks, track_prev_gray)
+                    count += 1
+                    cv2.namedWindow(f"LK_img_{hand_num}")
+                    cv2.imshow(f"LK_img_{hand_num}", track_vis)
+                    if motion is not None:
+                        # print("motion.shape = ", motion.shape) joints_num * 1 * 2
+                        # motionxy = [- int(motion[:, :, 0].mean()), - int(motion[:, :, 1].mean())]
+
+                        frame_width = frame.shape[1]
+                        frame_height = frame.shape[0]
+                        # next_bbox = (int(max(x_topleft, 0)), 
+                        #              int(max(y_topleft, 0)), 
+                        #              int(min(x_topleft + roi_w, frame_width)), 
+                        #              int(min(y_topleft + roi_h, frame_height)))
+                        inv_trans = cv2.invertAffineTransform(trans)
+                        p1 =  np.array([p1], dtype=np.float32)
+                        p0 =  np.array([p0], dtype=np.float32)
+                        p1_inv = cv2.transform(p1.reshape(-1, 1, 2), inv_trans).reshape(-1, 2)
+                        p0_inv = cv2.transform(p0.reshape(-1, 1, 2), inv_trans).reshape(-1, 2)
+                        # print("0*******", p0_inv.shape)
+
+                        motionxy = -p1_inv + p0_inv # 注意，由于inp是跟着hand走的，光流计算的是背景像素的运动，跟hand运动是相反的
+                        # print("1*******", motionxy)
+                        motionxy = [np.mean(motionxy[:, 0]), np.mean(motionxy[:, 1])]
+                        motionxy = np.array(motionxy, dtype=np.float32)
+                        # print("2*******", motionxy)
+                        x_left = xmin + motionxy[0]
+                        y_top = ymin + motionxy[1]
+                        
+                        next_bbox = (int(max(x_left, 0)), 
+                                    int(max(y_top, 0)), 
+                                    int(min(x_left + roi_w, frame_width)), 
+                                    int(min(y_top + roi_h, frame_height)))
+
+
+                        plot_one_box(next_bbox, display_img, color=(0,0,255),line_thickness = 3)
+                        cv2.namedWindow(f"LK_pre_{hand_num}")
+                        cv2.imshow(f"LK_pre_{hand_num}", display_img)
+                    
+
                     # **************************img transform done.****************************
 
                     inps = cv2.cvtColor(inps, cv2.COLOR_BGR2RGB)  #在rle中，dataset的getitem中确实有这一条
@@ -311,7 +361,7 @@ def yolo_detect(
                     output = rle_module(inps)
                     time2 = time.time()
                     rle_cost = (time2 - time1) * 1000
-                    print("rle pre cost: ", rle_cost)
+                    # print("rle pre cost: ", rle_cost)
                     if (rle_cost < 20):
                         rle_pre_time.append(rle_cost)
 
@@ -364,6 +414,7 @@ if __name__ == "__main__":
     yolo_video_path = os.path.join(current_dir, 'yolo_v3', 'video', 'output.mp4')
     yolo_model_cfg = 'yolo' # yolo / yolo-tiny 模型结构
     rle_cfg_path = "./configs/256x192_res50_regress-flow_freihand.yaml"
+    rle_weights_path = ".//weights//model_0919_355.pth"
 
     yolo_img_size = 416 # 图像尺寸
     yolo_conf_thres = 0.5# 检测置信度
@@ -373,6 +424,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():#设置无梯度运行模型推理
         yolo_detect(rle_cfg = rle_cfg_path, 
+                    rle_weights = rle_weights_path,
             yolo_model_path = yolo_model_path,
             yolo_cfg = yolo_model_cfg,
             yolo_data_cfg = yolo_voc_config,

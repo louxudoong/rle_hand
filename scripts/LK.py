@@ -1,6 +1,6 @@
 '''
 使用yolov3作为hand detector, 并使用rle实现keypoints detection
-加入了LK光流进行追踪，但只是对其进行了验证，没有加入替代yolo并进行加速的逻辑
+加入了LK光流进行加速
 '''
 from rlepose.utils.valid_utils_lxd import paint
 from rlepose.utils.bbox import _box_to_center_scale, _center_scale_to_box
@@ -20,7 +20,7 @@ from yolo_v3.utils.parse_config import parse_data_cfg
 from yolo_v3.yolov3 import Yolov3, Yolov3Tiny
 from yolo_v3.utils.torch_utils import select_device
 
-from rlepose.utils.lxd_lk_tracker import LK_Tracker
+from rlepose.utils.lxd_lk_tracker import LK_Tracker, filter_background_motion
 
 def process_data(img, img_size=416):# 图像预处理
     img, _, _, _ = letterbox(img, height=img_size)
@@ -188,10 +188,23 @@ def yolo_detect(
 
     # 创建摄像头对象
     cap = cv2.VideoCapture(0)
-    count = 0
-    track_vis = None
-    track_prev_gray = None
+
+    max_LK_count = 1000 # LK连续预测的最大帧数
+    least_track_num = 5 # 保持追踪的最小角点数
+    motion_threshold = 2
+    avg_motion = np.zeros(2)  # 平均光流向量
+
+
+    frame_count = 0 # 摄像头输入图像的帧数
+    LK_count = 0 # LK连续预测的帧数
+    prev_track_num = 0 # 上一帧追踪的角点数
     last_tracks = []
+    track_prev_gray = None
+    lk_pre_bbox = [] # 包含上一帧的bbox
+    cur_bbox = None # 包含当前帧的bbox，用于计算rle和LK
+    track_vis = None
+    initial_bbox = None
+    last_motion = None
 
     while True:
         # 读取摄像头捕获的一帧图像
@@ -199,91 +212,115 @@ def yolo_detect(
         # 如果成功读取图像，则进行处理
         if ret:
             display_img = frame.copy()
+            # 启动yolo的3个条件：是初始帧；或追踪的角点数少于阈值；或LK连续运行帧数超出阈值
+            if (frame_count == 0) | (prev_track_num < least_track_num) | (LK_count > max_LK_count):
+                print(f"yolo on, for prev_track_num = {prev_track_num}, LK_count = {LK_count}")
 
-            # 2. 使用yolo读取图像，并输出hand bbox
-            img = process_data(display_img, yolo_img_size) # 把图像调整为3 * 416 * 416
-            if use_cuda:
-                torch.cuda.synchronize()
+                # 2. 使用yolo读取图像，并输出hand bbox
+                img = process_data(display_img, yolo_img_size) # 把图像调整为3 * 416 * 416
+                if use_cuda:
+                    torch.cuda.synchronize()
             
-            img = torch.from_numpy(img).unsqueeze(0).to(device)
-            time1 = time.time()
-            pred, _ = yolo_model(img) #yolo prediction, 注意，这里输入模型的为
-            time2 = time.time()
-            yolo_cost = (time2 - time1) * 1000
-            # print("yolo pre cost: ", yolo_cost)
-            if (yolo_cost < 20):
-                yolo_pre_time.append(yolo_cost)
+                img = torch.from_numpy(img).unsqueeze(0).to(device)
+                time1 = time.time()
+                pred, _ = yolo_model(img) #yolo prediction, 注意，这里输入模型的为
+                time2 = time.time()
+                yolo_cost = (time2 - time1) * 1000
+                # print("yolo pre cost: ", yolo_cost)
+                if (yolo_cost < 20):
+                    yolo_pre_time.append(yolo_cost)
 
-            if use_cuda:
-                torch.cuda.synchronize()
+                if use_cuda:
+                    torch.cuda.synchronize()
 
-            detections = non_max_suppression(pred, yolo_conf_thres, yolo_nms_thres)[0] # nms
+                detections = non_max_suppression(pred, yolo_conf_thres, yolo_nms_thres)[0] # nms
 
-            if use_cuda:
-                torch.cuda.synchronize()
+                if use_cuda:
+                    torch.cuda.synchronize()
 
-            if detections is None or len(detections) == 0:
-                cv2.namedWindow('yolo',0)
-                cv2.imshow("yolo", display_img)
-                key = cv2.waitKey(1)
-                # print("yolo prediction fail.")
-                if key == 27:
-                    break
-                continue
+                if detections is None or len(detections) == 0:
+                    cv2.namedWindow('hand detect',0)
+                    cv2.imshow("hand detect", display_img)
+                    key = cv2.waitKey(1)
+                    
+                    if key == 27:
+                        break
+                    continue
 
-            detections[:, :4] = scale_coords(yolo_img_size, detections[:, :4], frame.shape).round() # 将yolo的bbox转换到rle_input的size
+                detections[:, :4] = scale_coords(yolo_img_size, detections[:, :4], frame.shape).round() # 将yolo的bbox转换到rle_input的size
 
-            result = []
-            for res in detections:
-                result.append((classes[int(res[-1])], float(res[4]), [int(res[0]), int(res[1]), int(res[2]), int(res[3])]))
+                result = []
+                for res in detections:
+                    result.append((classes[int(res[-1])], float(res[4]), [int(res[0]), int(res[1]), int(res[2]), int(res[3])]))
 
-            if use_cuda:
-                torch.cuda.synchronize()
+                if use_cuda:
+                    torch.cuda.synchronize()
 
-            # 显示yolo model
-            # print(result)
+            
+                lxd_output = [] # hand_nums * 5
 
-            # for r in result:
-            #     print(r)
-        
-            lxd_output = [] # hand_nums * 5
-            # print(detections)
-            # print(detections.shape)
-            # Draw bounding boxes and labels of detections
-            for *xyxy, conf, cls_conf, cls in detections:
-                label = '%s %.2f' % (classes[int(cls)], conf)
-                # label = '%s' % (classes[int(cls)])
+                # Draw bounding boxes and labels of detections
+                for *xyxy, conf, cls_conf, cls in detections:
+                    label = '%s %.2f' % (classes[int(cls)], conf)
+                    # label = '%s' % (classes[int(cls)])
 
-                # print(conf, cls_conf)
-                # xyxy = refine_hand_bbox(xyxy,im0.shape)
-                xyxy = int(xyxy[0]),int(xyxy[1])+6,int(xyxy[2]),int(xyxy[3])
-                outputi = [int(xyxy[0]), int(xyxy[1])+6, int(xyxy[2]), int(xyxy[3]), conf]
-                lxd_output.append(outputi)
+                    # print(conf, cls_conf)
+                    # xyxy = refine_hand_bbox(xyxy,im0.shape)
+                    xyxy = int(xyxy[0]),int(xyxy[1])+6,int(xyxy[2]),int(xyxy[3])
+                    # outputi = [int(xyxy[0]), int(xyxy[1])+6, int(xyxy[2]), int(xyxy[3]), conf] 不想要置信度了
+                    lxd_output.append([int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])])
 
-                if int(cls) == 0:
-                    plot_one_box(xyxy, display_img, label=label, color=(15,255,95),line_thickness = 3)
-                else:
-                    plot_one_box(xyxy, display_img, label=label, color=(15,155,255),line_thickness = 3)
+                    if int(cls) == 0:
+                        plot_one_box(xyxy, display_img, label=label, color=(15,255,95),line_thickness = 3)
+                    else:
+                        plot_one_box(xyxy, display_img, label=label, color=(15,155,255),line_thickness = 3)
 
-            # print(lxd_output)
+                # print(lxd_output)
 
-            cv2.namedWindow('yolo',0)
-            cv2.imshow("yolo", display_img)
+                cv2.namedWindow('hand detect')
+                cv2.imshow("hand detect", display_img)
 
-            # str_fps = ("{:.2f} Fps".format(1./(s2 - t+0.00001)))
-            # cv2.putText(init_img, str_fps, (5,init_img.shape[0]-3),cv2.FONT_HERSHEY_DUPLEX, 0.9, (255, 0, 255),4)
-            # cv2.putText(init_img, str_fps, (5,init_img.shape[0]-3),cv2.FONT_HERSHEY_DUPLEX, 0.9, (255, 255, 0),1)
+                # str_fps = ("{:.2f} Fps".format(1./(s2 - t+0.00001)))
+                # cv2.putText(init_img, str_fps, (5,init_img.shape[0]-3),cv2.FONT_HERSHEY_DUPLEX, 0.9, (255, 0, 255),4)
+                # cv2.putText(init_img, str_fps, (5,init_img.shape[0]-3),cv2.FONT_HERSHEY_DUPLEX, 0.9, (255, 255, 0),1)
 
-            # cv2.namedWindow('yolo',0)
-            # cv2.imshow("yolo", display_img)
+                # cv2.namedWindow('yolo',0)
+                # cv2.imshow("yolo", display_img)
 
-            # 3. predict hand keypoints from rle
-            # if lxd_output[4] 
+                # 3. predict hand keypoints from rle
+                # if lxd_output[4] 
+
+                # 每一次调用yolo，都需要进行initial_bbox、avg_motion、LK_count的初始化
+                cur_bbox = lxd_output
+                initial_bbox = cur_bbox
+                LK_count = 0
+                avg_motion = np.zeros(2)
+
+            else: # 不是第一帧的话，那我们就拥有历史信息：
+                # 由于这次没有yolo给bbox了，如何给cur_bbox赋值呢？
+                # 答案是根据last motion和last bbox来计算cur_bbox
+                print("LK on")
+                if use_cuda:
+                    torch.cuda.synchronize()
+                cur_bbox = lk_pre_bbox
+
+
+                for lk_box in lk_pre_bbox:
+
+                    plot_one_box(lk_box, display_img, color=(0,0,255),line_thickness = 3)
+
+                cv2.namedWindow('hand detect')
+                cv2.imshow("hand detect", display_img)
+                LK_count += 1
+
+
             if 1 :
                 # 注意，rle的所有输出统一到rle_input_size下
-                for hand_num in range(len(lxd_output)):
+                lk_bbox = []
+                for hand_num in range(len(cur_bbox)):
                     inps = frame.copy()
-                    bbox = lxd_output[hand_num][:4]
+                    # 根据bbox计算inps
+                    bbox = cur_bbox[hand_num][:4]
                     xmin, ymin, xmax, ymax = bbox
                     aspect_ratio = float(rle_input_size[1]) / rle_input_size[0]  # w / h
                     center, scale = _box_to_center_scale(xmin, ymin, xmax - xmin, ymax - ymin, aspect_ratio, scale_mult=1.25)
@@ -297,12 +334,13 @@ def yolo_detect(
                     # add LK-Tracker
                     roi_w = xmax - xmin
                     roi_h = ymax - ymin
-                    track_vis, track_prev_gray, last_tracks, motion, p1, p0 = LK_Tracker(inps, count, last_tracks, track_prev_gray)
-                    count += 1
+                    track_vis, track_prev_gray, last_tracks, motion, p1, p0 = LK_Tracker(inps, frame_count, last_tracks, track_prev_gray)
+                    prev_track_num = len(last_tracks)
+                    
                     cv2.namedWindow(f"LK_img_{hand_num}")
                     cv2.imshow(f"LK_img_{hand_num}", track_vis)
                     if motion is not None:
-                        # print("motion.shape = ", motion.shape) joints_num * 1 * 2
+                        # ("motion.shape = ", motion.shape) joints_num * 1 * 2
                         # motionxy = [- int(motion[:, :, 0].mean()), - int(motion[:, :, 1].mean())]
 
                         frame_width = frame.shape[1]
@@ -312,36 +350,88 @@ def yolo_detect(
                         #              int(min(x_topleft + roi_w, frame_width)), 
                         #              int(min(y_topleft + roi_h, frame_height)))
                         inv_trans = cv2.invertAffineTransform(trans)
-                        print("p0*******", p0.shape)
-                        print("p1*******", p1.shape)
+
         
                         p1 =  np.array([p1], dtype=np.float32)
                         p0 =  np.array([p0], dtype=np.float32)
                         p1_inv = cv2.transform(p1.reshape(-1, 1, 2), inv_trans).reshape(-1, 2)
                         p0_inv = cv2.transform(p0.reshape(-1, 1, 2), inv_trans).reshape(-1, 2)
+
+                        # motionxy = -p1_inv + p0_inv # 注意，在每一帧都随着yolo走时，由于inp是跟着hand走的，光流计算的是背景像素的运动，跟hand运动是相反的；
+                        motionxy = p1_inv - p0_inv # 而在检测框被锁定在yolo的初始帧后，背景不再运动，动的是手，此时不用取逆。
+
+                        # 为减少背景角点的干扰，根据到center_distance筛选最近的5个点
+                        center_x = center[0]
+                        center_y = center[1]
+                        distances = [np.linalg.norm(p - [center_x, center_y]) for p in p1_inv]
+
+                        if len(distances) >= 5:
+                            sorted_indices = np.argsort(distances)
+                            closest_points = sorted_indices[:5]
+                            motionxy = np.array(motionxy)[closest_points, :]
                         
+                        motionxy = [m for m in motionxy if abs(m[0]) > motion_threshold or abs(m[1]) > motion_threshold] # 只筛选具有位移的点
 
-                        motionxy = -p1_inv + p0_inv # 注意，由于inp是跟着hand走的，光流计算的是背景像素的运动，跟hand运动是相反的
-                        # print("1*******", motionxy)
-                        motionxy = [np.mean(motionxy[:, 0]), np.mean(motionxy[:, 1])]
-                        motionxy = np.array(motionxy, dtype=np.float32)
-                        # print("2*******", motionxy)
-                        x_left = xmin + motionxy[0]
-                        y_top = ymin + motionxy[1]
+                        # 剔除与last_motion反方向的motion
+                        if last_motion is not None and len(motionxy) > 0:
+                            motionxy = filter_background_motion(np.array(last_motion), np.array(motionxy), 120)
+
+                        if len(motionxy) > 0:
+                            motionxy = np.array(motionxy, dtype=np.float32)
+                            
+                            motionxy = [np.mean(motionxy[:, 0]), np.mean(motionxy[:, 1])]
+                            motionxy = np.array(motionxy, dtype=np.float32)
+                            
+                        else:
+                            motionxy = np.zeros(2)
+
+                        initial_bbox_n = initial_bbox[hand_num]
+
+                        if np.linalg.norm(motionxy) > motion_threshold:  # 判断手部整体移动是否超过阈值
+                            # x_left = xmin + avg_motion[0]
+                            # y_top = ymin + avg_motion[1]
+                            # avg_motion += motionxy # 无平滑
+                            avg_motion += (motionxy / 2.) # 减少位移的累积
+                            # avg_motion = (avg_motion + motionxy) / 2. # 平滑方法2
+                            x_left = initial_bbox_n[0] + avg_motion[0]
+                            y_top = initial_bbox_n[1] + avg_motion[1] # 将一次光流累计的motion作用在yolo给出的initial_bbox上
                         
-                        next_bbox = (int(max(x_left, 0)), 
-                                    int(max(y_top, 0)), 
-                                    int(min(x_left + roi_w, frame_width)), 
-                                    int(min(y_top + roi_h, frame_height)))
+                            next_bbox = (int(max(x_left, 0)), 
+                                        int(max(y_top, 0)), 
+                                        int(min(x_left + roi_w, frame_width)), 
+                                        int(min(y_top + roi_h, frame_height)))
+                            # 0922:
+                            # 下礼拜1来了，尝试把光流估计的offset加到yolo给出的init bbox中，避免光流自己吃自己的屎把框搞飞了
+                            # delta_vector = [next_bbox[i] - initial_bbox_n[i] for i in range(len(next_bbox))]
 
+                            # cur_win_pos = (next_bbox[0], next_bbox[1])
 
-                        plot_one_box(next_bbox, display_img, color=(0,0,255),line_thickness = 3)
-                        cv2.namedWindow(f"LK_pre_{hand_num}")
-                        cv2.imshow(f"LK_pre_{hand_num}", display_img)
-                    
+                            # # 计算相对于初始bbox的偏移量
+                            # win_pos_delta = (cur_win_pos[0] - prev_win_pos_n[0], cur_win_pos[1] - prev_win_pos_n[1])
+                            # delta_vector = [delta_vector[i] - win_pos_delta[i] for i in range(len(delta_vector))]
 
+                            # prev_win_pos = cur_win_pos
+                            last_motion = avg_motion
+                            print("motionxy: ", last_motion)
+                            lk_bbox.append(next_bbox)
+                            
+                        else:
+                            last_motion = np.zeros(2)
+                            print("motionxy: ", last_motion)
+                            lk_bbox.append(cur_bbox[hand_num]) # 不然不动，防止手静止不动光流窗口也会很快飞走的bug
+                            
+
+                        # plot_one_box(next_bbox, display_img, color=(0,0,255),line_thickness = 3)
+                        # cv2.namedWindow(f"LK_pre_{hand_num}")
+                        # cv2.imshow(f"LK_pre_{hand_num}", display_img)
+
+                    else:
+                        lk_bbox.append(cur_bbox[hand_num]) # motion = None的情况下
                     # **************************img transform done.****************************
 
+
+
+                    # draw rle imgs
                     inps = cv2.cvtColor(inps, cv2.COLOR_BGR2RGB)  #在rle中，dataset的getitem中确实有这一条
                     imgwidth, imght = inps.shape[1], inps.shape[0]
                     assert imgwidth == inps.shape[1] and imght == inps.shape[0]
@@ -363,6 +453,8 @@ def yolo_detect(
                     time1 = time.time()
                     # print("3********************************", inps.shape)
                     output = rle_module(inps)
+                    if use_cuda:
+                        torch.cuda.synchronize()
                     time2 = time.time()
                     rle_cost = (time2 - time1) * 1000
                     # print("rle pre cost: ", rle_cost)
@@ -385,7 +477,10 @@ def yolo_detect(
 
                         cv2.namedWindow(f"rle_display_{hand_num}")
                         cv2.imshow(f"rle_display_{hand_num}", rle_display_img)
-            
+
+                lk_pre_bbox = lk_bbox
+
+        frame_count += 1     
         
         # 按下 'q' 键退出循环
         if cv2.waitKey(1) & 0xFF == ord('q'):
